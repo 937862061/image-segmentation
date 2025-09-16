@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片框选裁剪工具</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖼️</text></svg>">
+    
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- 左侧菜单栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>🖼️ 图片裁剪</h2>
+            </div>
+
+            <!-- 主要操作区 -->
+            <div class="main-actions">
+                <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                <button id="uploadBtn" class="btn btn-primary">
+                    <span class="btn-icon">📁</span>
+                    <span class="btn-text">上传图片</span>
+                </button>
+                <button id="exportBtn" class="btn btn-success" disabled>
+                    <span class="btn-icon">💾</span>
+                    <span class="btn-text">导出选区</span>
+                </button>
+            </div>
+
+            <!-- 工具栏 -->
+            <div class="toolbar">
+                <div class="tool-group">
+                    <label class="tool-label">模式 (空格切换)</label>
+                    <div class="mode-toggle">
+                        <button id="selectModeBtn" class="mode-btn active" title="选择模式">
+                            <span class="mode-icon">⊞</span>
+                            <span class="btn-text">选择模式</span>
+                        </button>
+                        <button id="panModeBtn" class="mode-btn" title="拖动模式">
+                            <span class="mode-icon">✋</span>
+                            <span class="btn-text">拖动模式</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tool-group">
+                    <label class="tool-label">缩放 <span id="zoomLevel">100%</span></label>
+                    <div class="zoom-toolbar">
+                        <button id="zoomOutBtn" class="tool-btn" title="缩小 (Ctrl+-)">➖</button>
+                        <select id="zoomPreset" class="zoom-select">
+                            <option value="25">25%</option>
+                            <option value="50">50%</option>
+                            <option value="75">75%</option>
+                            <option value="100" selected>100%</option>
+                            <option value="125">125%</option>
+                            <option value="150">150%</option>
+                            <option value="200">200%</option>
+                            <option value="300">300%</option>
+                        </select>
+                        <button id="zoomInBtn" class="tool-btn" title="放大 (Ctrl++)">➕</button>
+                    </div>
+                    <div class="zoom-actions">
+                        <button id="fitZoomBtn" class="tool-btn-small" title="适合窗口">📐
+                            <span class="btn-text">适合窗口</span>
+                        </button>
+                        <button id="resetZoomBtn" class="tool-btn-small" title="重置 (Ctrl+0)">🎯
+                            <span class="btn-text">重置</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 选择框列表 -->
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <h3>选择框</h3>
+                    <span class="selection-count" id="selectionCount">0</span>
+                </div>
+                <div id="selectionList" class="selection-list">
+                    <div class="no-selections">
+                        <div class="empty-icon">📋</div>
+                        <div class="empty-text">暂无选择框</div>
+                        <div class="empty-hint">在图片上拖拽创建</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷键提示 -->
+            <div class="sidebar-section shortcuts-section">
+                <div class="section-header collapsible" onclick="toggleShortcuts()">
+                    <h3>快捷键</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="shortcuts" id="shortcutsContent">
+                    <div class="shortcut-group">
+                        <div class="shortcut-title">缩放</div>
+                        <div class="shortcut-item">
+                            <span class="key">Ctrl + +/-</span>
+                            <span class="desc">放大/缩小</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="key">滚轮</span>
+                            <span class="desc">精确缩放</span>
+                        </div>
+                    </div>
+                    <div class="shortcut-group">
+                        <div class="shortcut-title">操作</div>
+                        <div class="shortcut-item">
+                            <span class="key">空格</span>
+                            <span class="desc">切换模式</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="key">Delete</span>
+                            <span class="desc">删除选择框</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="key">Tab</span>
+                            <span class="desc">切换选择框</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧操作区 -->
+        <div class="main-area">
+            <div class="canvas-container">
+                <canvas id="mainCanvas" width="800" height="600"></canvas>
+                <div id="welcomeMessage" class="welcome-message">
+                    <div class="welcome-content">
+                        <h3>欢迎使用图片框选裁剪工具</h3>
+                        <p>请点击左侧的"上传图片"按钮开始使用</p>
+                        <div class="features">
+                            <div class="feature-item">✓ 支持多个选择框</div>
+                            <div class="feature-item">✓ 自由调整选框大小</div>
+                            <div class="feature-item">✓ 快捷键缩放</div>
+                            <div class="feature-item">✓ 批量导出裁剪</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 状态提示 -->
+            <div id="statusMessage" class="status-message"></div>
+        </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-item" id="deleteSelection">删除选择框</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
