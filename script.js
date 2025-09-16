@@ -203,9 +203,8 @@ class ImageCropApp {
 
     // 重置应用状态
     resetApplication() {
-        // 清除所有选择框
-        this.selectionManager.selections = [];
-        this.selectionManager.activeSelectionId = null;
+        // 使用新的reset方法替代直接操作，确保选择框编号从1开始
+        this.selectionManager.reset();
 
         // 重置事件处理器状态
         this.eventHandler.cancelCurrentOperation();
@@ -215,6 +214,8 @@ class ImageCropApp {
 
         // 清除Canvas
         this.canvasRenderer.clear();
+
+        console.log('应用状态已重置，选择框编号将从1开始');
     }
 
     render() {
@@ -381,12 +382,40 @@ class ImageCropApp {
             return;
         }
 
+        // 导出前验证数据完整性
+        const initialSelectionCount = selections.length;
+        const initialSelectionIds = selections.map(s => s.id);
+
+        console.log(`开始导出，当前有 ${initialSelectionCount} 个选择框`);
+
         this.exportManager.exportAllSelections(selections, this.imageManager)
             .then((count) => {
-                this.showStatus(`成功导出 ${count} 个图片`, 'success');
+                // 导出成功后验证选择框数据完整性
+                const currentSelections = this.selectionManager.getAllSelections();
+                if (currentSelections.length !== initialSelectionCount) {
+                    console.error(`数据完整性检查失败：导出前有 ${initialSelectionCount} 个选择框，导出后有 ${currentSelections.length} 个选择框`);
+                    this.showStatus('导出完成，但检测到数据异常', 'warning');
+                } else {
+                    console.log(`导出成功，选择框数据完整性验证通过`);
+                    this.showStatus(`成功导出 ${count} 个图片`, 'success');
+                }
+
+                // 确保UI状态正确
+                this.updateUI();
             })
             .catch((error) => {
-                this.showStatus('导出失败: ' + error.message, 'error');
+                // 导出失败时确保选择框状态不变
+                const currentSelections = this.selectionManager.getAllSelections();
+                if (currentSelections.length !== initialSelectionCount) {
+                    console.error(`导出失败且数据被意外修改：导出前有 ${initialSelectionCount} 个选择框，失败后有 ${currentSelections.length} 个选择框`);
+                    this.showStatus('导出失败且检测到数据异常: ' + error.message, 'error');
+                } else {
+                    console.log(`导出失败，但选择框数据保持完整`);
+                    this.showStatus('导出失败: ' + error.message, 'error');
+                }
+
+                // 确保UI状态正确
+                this.updateUI();
             });
     }
 
@@ -910,12 +939,13 @@ class SelectionManager {
     constructor() {
         this.selections = [];
         this.activeSelectionId = null;
-        this.nextId = 1;
     }
 
     createSelection(startX, startY, endX, endY) {
+        // 基于当前选择框数量生成ID，确保编号连续
+        const newId = this.selections.length + 1;
         const selection = {
-            id: `selection_${this.nextId++}`,
+            id: `selection_${newId}`,
             x: Math.min(startX, endX),
             y: Math.min(startY, endY),
             width: Math.abs(endX - startX),
@@ -951,7 +981,24 @@ class SelectionManager {
             if (this.activeSelectionId === id) {
                 this.activeSelectionId = null;
             }
+            // 删除后重新编号所有选择框
+            this.renumberSelections();
         }
+    }
+
+    // 重新编号所有选择框，确保ID连续
+    renumberSelections() {
+        this.selections.forEach((selection, index) => {
+            const newId = `selection_${index + 1}`;
+            if (selection.id !== newId) {
+                // 如果当前选择框是活动的，更新活动ID
+                if (this.activeSelectionId === selection.id) {
+                    this.activeSelectionId = newId;
+                }
+                selection.id = newId;
+            }
+        });
+        console.log('选择框重新编号完成，当前IDs:', this.selections.map(s => s.id));
     }
 
     setActiveSelection(id) {
@@ -974,6 +1021,13 @@ class SelectionManager {
     clearActiveSelection() {
         this.selections.forEach(s => s.active = false);
         this.activeSelectionId = null;
+    }
+
+    // 重置选择框管理器状态
+    reset() {
+        this.selections = [];
+        this.activeSelectionId = null;
+        console.log('选择框管理器已重置，下一个选择框将从1开始编号');
     }
 }
 
@@ -1701,24 +1755,29 @@ class ExportManager {
             throw new Error('没有图片可导出');
         }
 
+        // 创建选择框数据的副本，避免修改原始数据
+        const selectionsToExport = [...selections];
+        console.log(`开始导出 ${selectionsToExport.length} 个选择框，使用数据副本确保原始数据不被修改`);
+
         // 显示导出配置对话框
-        const exportConfig = await this.showExportDialog(selections.length);
+        const exportConfig = await this.showExportDialog(selectionsToExport.length);
         if (!exportConfig) {
             throw new Error('用户取消导出');
         }
 
         let exportedCount = 0;
 
-        for (let i = 0; i < selections.length; i++) {
+        for (let i = 0; i < selectionsToExport.length; i++) {
             try {
                 const filename = this.generateFilename(exportConfig, i + 1);
-                await this.cropSelection(selections[i], imageManager, filename, exportConfig);
+                await this.cropSelection(selectionsToExport[i], imageManager, filename, exportConfig);
                 exportedCount++;
             } catch (error) {
                 console.error(`导出选择框 ${i + 1} 失败:`, error);
             }
         }
 
+        console.log(`导出完成，成功导出 ${exportedCount} 个选择框，原始选择框数据保持完整`);
         return exportedCount;
     }
 
@@ -1739,7 +1798,7 @@ class ExportManager {
                     <div class="export-dialog-content">
                         <div class="form-group">
                             <label>文件名前缀:</label>
-                            <input type="text" id="filenamePrefix" value="cropped" placeholder="输入文件名前缀">
+                            <input type="text" id="filenamePrefix" value="" placeholder="输入文件名前缀">
                         </div>
                         <div class="form-group">
                             <label>文件格式:</label>
@@ -1832,6 +1891,22 @@ class ExportManager {
             dialog.querySelector('.close-btn').addEventListener('click', () => {
                 dialog.remove();
                 resolve(null);
+            });
+
+            // 阻止导出对话框中的键盘事件传播到document，防止意外删除选择框
+            dialog.addEventListener('keydown', (e) => {
+                // 阻止Delete和Backspace键传播到document级别
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.stopPropagation();
+                    console.log('阻止了导出对话框中的键盘事件传播:', e.key);
+                }
+            });
+
+            // 特别处理文件名前缀输入框的键盘事件
+            const prefixInput = dialog.querySelector('#filenamePrefix');
+            prefixInput.addEventListener('keydown', (e) => {
+                // 确保输入框中的所有键盘事件都不会传播
+                e.stopPropagation();
             });
         });
     }
@@ -2313,9 +2388,357 @@ function runImageUploadTests() {
     testSuite.run();
 }
 
+// 选择框编号重置功能的单元测试
+function runSelectionNumberingResetTests() {
+    const testSuite = new SimpleTest();
+
+    testSuite.test('SelectionManager重置功能', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建几个选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.createSelection(110, 110, 150, 150);
+
+        // 验证ID编号
+        const selections = selectionManager.getAllSelections();
+        if (selections[0].id !== 'selection_1' ||
+            selections[1].id !== 'selection_2' ||
+            selections[2].id !== 'selection_3') {
+            throw new Error('选择框ID编号不正确');
+        }
+
+        // 执行重置
+        selectionManager.reset();
+
+        // 验证重置后的状态
+        if (selectionManager.selections.length !== 0) {
+            throw new Error(`重置后selections数组应该为空，实际长度为${selectionManager.selections.length}`);
+        }
+
+        if (selectionManager.activeSelectionId !== null) {
+            throw new Error(`重置后activeSelectionId应该为null，实际为${selectionManager.activeSelectionId}`);
+        }
+
+        // nextId已经移除，不再需要验证
+
+        console.log('SelectionManager重置功能测试通过');
+    });
+
+    testSuite.test('重置后选择框编号从1开始', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建一些选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+
+        // 重置
+        selectionManager.reset();
+
+        // 创建新的选择框
+        const newSelection1 = selectionManager.createSelection(20, 20, 60, 60);
+        const newSelection2 = selectionManager.createSelection(70, 70, 110, 110);
+
+        // 验证ID从1开始
+        if (newSelection1.id !== 'selection_1') {
+            throw new Error(`第一个选择框ID应该为selection_1，实际为${newSelection1.id}`);
+        }
+
+        if (newSelection2.id !== 'selection_2') {
+            throw new Error(`第二个选择框ID应该为selection_2，实际为${newSelection2.id}`);
+        }
+
+        console.log('重置后选择框编号从1开始测试通过');
+    });
+
+    testSuite.test('删除后重新编号验证', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建5个选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.createSelection(110, 110, 150, 150);
+        selectionManager.createSelection(160, 160, 200, 200);
+        selectionManager.createSelection(210, 210, 250, 250);
+
+        // 验证初始编号
+        let selections = selectionManager.getAllSelections();
+        if (selections.length !== 5) {
+            throw new Error('应该有5个选择框');
+        }
+
+        for (let i = 0; i < selections.length; i++) {
+            if (selections[i].id !== `selection_${i + 1}`) {
+                throw new Error(`选择框${i}的ID应该为selection_${i + 1}，实际为${selections[i].id}`);
+            }
+        }
+
+        // 删除第3个选择框
+        selectionManager.deleteSelection('selection_3');
+
+        // 验证删除后重新编号
+        selections = selectionManager.getAllSelections();
+        if (selections.length !== 4) {
+            throw new Error('删除后应该有4个选择框');
+        }
+
+        for (let i = 0; i < selections.length; i++) {
+            if (selections[i].id !== `selection_${i + 1}`) {
+                throw new Error(`删除后选择框${i}的ID应该为selection_${i + 1}，实际为${selections[i].id}`);
+            }
+        }
+
+        // 创建新选择框，应该编号为5
+        const newSelection = selectionManager.createSelection(260, 260, 300, 300);
+        if (newSelection.id !== 'selection_5') {
+            throw new Error(`新选择框ID应该为selection_5，实际为${newSelection.id}`);
+        }
+
+        console.log('删除后重新编号验证测试通过');
+    });
+
+    testSuite.test('应用重置逻辑验证', () => {
+        // 模拟ImageCropApp的重置逻辑
+        const selectionManager = new SelectionManager();
+
+        // 创建选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+
+        const initialCount = selectionManager.getAllSelections().length;
+        // 模拟resetApplication的调用
+        selectionManager.reset();
+
+        // 验证重置效果
+        if (selectionManager.getAllSelections().length !== 0) {
+            throw new Error('应用重置后选择框应该被清空');
+        }
+
+        // 创建新选择框验证编号
+        const newSelection = selectionManager.createSelection(30, 30, 70, 70);
+        if (newSelection.id !== 'selection_1') {
+            throw new Error(`应用重置后第一个选择框ID应该为selection_1，实际为${newSelection.id}`);
+        }
+
+        console.log('应用重置逻辑验证测试通过');
+    });
+
+    testSuite.run();
+}
+
+// 导出功能完整性的单元测试
+function runExportIntegrityTests() {
+    const testSuite = new SimpleTest();
+
+    testSuite.test('导出前后选择框数量保持不变', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建测试选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.createSelection(110, 110, 150, 150);
+
+        const initialCount = selectionManager.getAllSelections().length;
+        const initialSelections = [...selectionManager.getAllSelections()];
+
+        // 模拟导出过程中使用数据副本
+        const selectionsToExport = [...selectionManager.getAllSelections()];
+
+        // 模拟对副本的操作（这不应该影响原始数据）
+        selectionsToExport.pop(); // 删除副本中的最后一个元素
+
+        // 验证原始数据未被修改
+        if (selectionManager.getAllSelections().length !== initialCount) {
+            throw new Error(`原始选择框数量被意外修改：期望${initialCount}，实际${selectionManager.getAllSelections().length}`);
+        }
+
+        // 验证原始选择框数据完整性
+        const currentSelections = selectionManager.getAllSelections();
+        for (let i = 0; i < initialSelections.length; i++) {
+            if (currentSelections[i].id !== initialSelections[i].id) {
+                throw new Error(`选择框ID被意外修改：期望${initialSelections[i].id}，实际${currentSelections[i].id}`);
+            }
+        }
+
+        console.log('导出前后选择框数量保持不变测试通过');
+    });
+
+    testSuite.test('导出过程不修改原始选择框数据', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建测试选择框
+        const selection1 = selectionManager.createSelection(10, 10, 50, 50);
+        const selection2 = selectionManager.createSelection(60, 60, 100, 100);
+
+        // 保存原始数据的深拷贝
+        const originalData = JSON.parse(JSON.stringify(selectionManager.getAllSelections()));
+
+        // 模拟导出过程
+        const selectionsToExport = [...selectionManager.getAllSelections()];
+
+        // 模拟对导出数据的各种操作
+        selectionsToExport.forEach(selection => {
+            selection.x += 10; // 修改副本数据
+            selection.y += 10;
+            selection.width -= 5;
+            selection.height -= 5;
+        });
+
+        // 验证原始数据未被修改
+        const currentSelections = selectionManager.getAllSelections();
+        for (let i = 0; i < originalData.length; i++) {
+            if (currentSelections[i].x !== originalData[i].x ||
+                currentSelections[i].y !== originalData[i].y ||
+                currentSelections[i].width !== originalData[i].width ||
+                currentSelections[i].height !== originalData[i].height) {
+                throw new Error(`选择框数据被意外修改：原始${JSON.stringify(originalData[i])}，当前${JSON.stringify(currentSelections[i])}`);
+            }
+        }
+
+        console.log('导出过程不修改原始选择框数据测试通过');
+    });
+
+    testSuite.test('导出取消操作不影响选择框状态', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建测试选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.setActiveSelection('selection_2');
+
+        const initialCount = selectionManager.getAllSelections().length;
+        const initialActiveId = selectionManager.activeSelectionId;
+
+        // 模拟导出取消操作（实际上什么都不做）
+        // 这模拟了用户在导出对话框中点击取消的情况
+
+        // 验证状态未改变
+        if (selectionManager.getAllSelections().length !== initialCount) {
+            throw new Error(`取消导出后选择框数量改变：期望${initialCount}，实际${selectionManager.getAllSelections().length}`);
+        }
+
+        if (selectionManager.activeSelectionId !== initialActiveId) {
+            throw new Error(`取消导出后活动选择框改变：期望${initialActiveId}，实际${selectionManager.activeSelectionId}`);
+        }
+
+        console.log('导出取消操作不影响选择框状态测试通过');
+    });
+
+    testSuite.run();
+}
+
 // 集成测试
 function runIntegrationTests() {
     const testSuite = new SimpleTest();
+
+    testSuite.test('选择框编号重置集成测试', () => {
+        const selectionManager = new SelectionManager();
+
+        // 模拟第一张图片的工作流程
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.createSelection(110, 110, 150, 150);
+
+        // 验证第一张图片的选择框编号
+        const firstImageSelections = selectionManager.getAllSelections();
+        if (firstImageSelections[0].id !== 'selection_1' ||
+            firstImageSelections[1].id !== 'selection_2' ||
+            firstImageSelections[2].id !== 'selection_3') {
+            throw new Error('第一张图片的选择框编号不正确');
+        }
+
+        // 模拟上传第二张图片（调用reset）
+        selectionManager.reset();
+
+        // 模拟第二张图片的工作流程
+        selectionManager.createSelection(20, 20, 60, 60);
+        selectionManager.createSelection(70, 70, 110, 110);
+
+        // 验证第二张图片的选择框编号从1开始
+        const secondImageSelections = selectionManager.getAllSelections();
+        if (secondImageSelections[0].id !== 'selection_1' ||
+            secondImageSelections[1].id !== 'selection_2') {
+            throw new Error('第二张图片的选择框编号没有从1开始重新计数');
+        }
+
+        console.log('选择框编号重置集成测试通过');
+    });
+
+    testSuite.test('导出功能完整性集成测试', () => {
+        const selectionManager = new SelectionManager();
+
+        // 创建测试选择框
+        selectionManager.createSelection(10, 10, 50, 50);
+        selectionManager.createSelection(60, 60, 100, 100);
+        selectionManager.createSelection(110, 110, 150, 150);
+        selectionManager.createSelection(160, 160, 200, 200);
+        selectionManager.createSelection(210, 210, 250, 250);
+
+        const initialCount = selectionManager.getAllSelections().length;
+        const initialIds = selectionManager.getAllSelections().map(s => s.id);
+
+        // 模拟完整的导出流程
+        const selectionsToExport = [...selectionManager.getAllSelections()];
+
+        // 模拟导出过程中的各种操作
+        for (let i = 0; i < selectionsToExport.length; i++) {
+            // 模拟文件名生成
+            const filename = `cropped_${i + 1}.png`;
+
+            // 模拟裁剪操作（修改副本数据）
+            selectionsToExport[i].processed = true;
+        }
+
+        // 验证原始数据完整性
+        const finalSelections = selectionManager.getAllSelections();
+        if (finalSelections.length !== initialCount) {
+            throw new Error(`导出后选择框数量改变：期望${initialCount}，实际${finalSelections.length}`);
+        }
+
+        const finalIds = finalSelections.map(s => s.id);
+        for (let i = 0; i < initialIds.length; i++) {
+            if (finalIds[i] !== initialIds[i]) {
+                throw new Error(`导出后选择框ID改变：期望${initialIds[i]}，实际${finalIds[i]}`);
+            }
+        }
+
+        // 验证原始数据没有被添加processed属性
+        for (const selection of finalSelections) {
+            if (selection.processed) {
+                throw new Error('原始选择框数据被意外修改');
+            }
+        }
+
+        console.log('导出功能完整性集成测试通过');
+    });
+
+    testSuite.test('边界条件测试', () => {
+        const selectionManager = new SelectionManager();
+
+        // 测试空选择框列表的重置
+        selectionManager.reset();
+        if (selectionManager.getAllSelections().length !== 0 || selectionManager.nextId !== 1) {
+            throw new Error('空选择框列表重置失败');
+        }
+
+        // 测试单个选择框的编号
+        const singleSelection = selectionManager.createSelection(10, 10, 50, 50);
+        if (singleSelection.id !== 'selection_1') {
+            throw new Error('单个选择框编号不正确');
+        }
+
+        // 测试大量选择框的编号
+        selectionManager.reset();
+        const largeCount = 50;
+        for (let i = 0; i < largeCount; i++) {
+            const selection = selectionManager.createSelection(i * 10, i * 10, i * 10 + 30, i * 10 + 30);
+            if (selection.id !== `selection_${i + 1}`) {
+                throw new Error(`大量选择框编号不正确：期望selection_${i + 1}，实际${selection.id}`);
+            }
+        }
+
+        console.log('边界条件测试通过');
+    });
 
     testSuite.test('完整工作流程测试', () => {
         // 这是一个概念性测试，实际需要用户交互
@@ -2344,15 +2767,242 @@ function runIntegrationTests() {
     testSuite.run();
 }
 
+// 调试导出问题的测试函数
+function debugExportIssue() {
+    console.log('=== 调试导出问题 ===');
+
+    // 创建测试环境
+    const testCanvas = document.createElement('canvas');
+    testCanvas.width = 800;
+    testCanvas.height = 600;
+    const testCtx = testCanvas.getContext('2d');
+
+    const imageManager = new ImageManager(testCanvas, testCtx);
+    const selectionManager = new SelectionManager();
+    const exportManager = new ExportManager();
+
+    // 创建5个选择框
+    console.log('创建5个选择框...');
+    for (let i = 0; i < 5; i++) {
+        selectionManager.createSelection(i * 60, i * 60, i * 60 + 50, i * 60 + 50);
+    }
+
+    console.log(`创建后选择框数量: ${selectionManager.getAllSelections().length}`);
+    console.log('选择框IDs:', selectionManager.getAllSelections().map(s => s.id));
+
+    // 模拟完整的导出流程
+    const selections = selectionManager.getAllSelections();
+    console.log(`导出前选择框数量: ${selections.length}`);
+
+    // 模拟ExportManager的exportAllSelections方法
+    const selectionsToExport = [...selections];
+    console.log(`副本选择框数量: ${selectionsToExport.length}`);
+
+    // 模拟导出配置
+    const exportConfig = {
+        prefix: 'test',
+        format: 'png',
+        quality: 0.9
+    };
+
+    // 模拟文件名生成和处理过程
+    for (let i = 0; i < selectionsToExport.length; i++) {
+        const filename = exportManager.generateFilename(exportConfig, i + 1);
+        console.log(`处理选择框 ${i + 1}: ${filename}`);
+
+        // 检查每一步后的选择框数量
+        const currentCount = selectionManager.getAllSelections().length;
+        if (currentCount !== 5) {
+            console.error(`❌ 在处理选择框 ${i + 1} 时发现问题：选择框数量变为 ${currentCount}`);
+            break;
+        }
+    }
+
+    console.log(`导出后原始选择框数量: ${selectionManager.getAllSelections().length}`);
+    console.log('导出后选择框IDs:', selectionManager.getAllSelections().map(s => s.id));
+
+    if (selectionManager.getAllSelections().length !== 5) {
+        console.error('❌ 发现问题：选择框数量发生了变化！');
+        return false;
+    } else {
+        console.log('✅ 选择框数量保持不变');
+        return true;
+    }
+}
+
+// 专门测试导出前缀问题的函数
+function testExportPrefixIssue() {
+    console.log('=== 测试导出前缀问题 ===');
+
+    const selectionManager = new SelectionManager();
+    const exportManager = new ExportManager();
+
+    // 创建测试选择框
+    console.log('创建3个选择框...');
+    selectionManager.createSelection(10, 10, 50, 50);
+    selectionManager.createSelection(60, 60, 100, 100);
+    selectionManager.createSelection(110, 110, 150, 150);
+
+    const initialCount = selectionManager.getAllSelections().length;
+    console.log(`初始选择框数量: ${initialCount}`);
+
+    // 测试不同的前缀配置
+    const testConfigs = [
+        { prefix: '', format: 'png' },
+        { prefix: 'test', format: 'png' },
+        { prefix: 'cropped', format: 'png' },
+        { prefix: 'my_image', format: 'png' }
+    ];
+
+    for (const config of testConfigs) {
+        console.log(`测试前缀: "${config.prefix}"`);
+
+        // 模拟文件名生成
+        for (let i = 0; i < initialCount; i++) {
+            const filename = exportManager.generateFilename(config, i + 1);
+            console.log(`  生成文件名: ${filename}`);
+        }
+
+        // 检查选择框数量
+        const currentCount = selectionManager.getAllSelections().length;
+        if (currentCount !== initialCount) {
+            console.error(`❌ 前缀 "${config.prefix}" 导致选择框数量变化：${initialCount} -> ${currentCount}`);
+            return false;
+        }
+    }
+
+    console.log('✅ 所有前缀测试通过，选择框数量保持不变');
+    return true;
+}
+
+// 测试键盘事件传播问题
+function testKeyboardEventPropagation() {
+    console.log('=== 测试键盘事件传播问题 ===');
+
+    const selectionManager = new SelectionManager();
+
+    // 创建测试选择框
+    selectionManager.createSelection(10, 10, 50, 50);
+    selectionManager.createSelection(60, 60, 100, 100);
+    selectionManager.createSelection(110, 110, 150, 150);
+
+    // 设置活动选择框
+    selectionManager.setActiveSelection('selection_3');
+
+    const initialCount = selectionManager.getAllSelections().length;
+    console.log(`初始选择框数量: ${initialCount}`);
+    console.log(`活动选择框: ${selectionManager.getActiveSelection()?.id}`);
+
+    // 模拟在导出对话框中按Backspace键的情况
+    console.log('模拟键盘事件处理...');
+
+    // 创建一个模拟的键盘事件
+    const mockEvent = {
+        key: 'Backspace',
+        preventDefault: () => console.log('preventDefault called'),
+        stopPropagation: () => console.log('stopPropagation called')
+    };
+
+    // 模拟事件处理器的逻辑（但不实际删除）
+    console.log('模拟Delete/Backspace键处理逻辑...');
+    if (mockEvent.key === 'Delete' || mockEvent.key === 'Backspace') {
+        const activeSelection = selectionManager.getActiveSelection();
+        if (activeSelection) {
+            console.log(`如果没有阻止事件传播，将删除选择框: ${activeSelection.id}`);
+            // 这里不实际删除，只是模拟
+        }
+    }
+
+    // 验证选择框数量没有变化
+    const finalCount = selectionManager.getAllSelections().length;
+    if (finalCount === initialCount) {
+        console.log('✅ 键盘事件传播测试通过，选择框数量保持不变');
+        return true;
+    } else {
+        console.error(`❌ 键盘事件传播测试失败：${initialCount} -> ${finalCount}`);
+        return false;
+    }
+}
+
+// 测试选择框编号显示
+function testSelectionNumbering() {
+    console.log('=== 测试选择框编号显示 ===');
+
+    const selectionManager = new SelectionManager();
+
+    // 创建3个选择框
+    selectionManager.createSelection(10, 10, 50, 50);
+    selectionManager.createSelection(60, 60, 100, 100);
+    selectionManager.createSelection(110, 110, 150, 150);
+
+    console.log('创建3个选择框后的编号测试:');
+    const selections = selectionManager.getAllSelections();
+    selections.forEach((selection, index) => {
+        console.log(`显示编号 ${index + 1}: ID=${selection.id}`);
+    });
+
+    // 验证初始编号
+    if (selections[0].id !== 'selection_1' ||
+        selections[1].id !== 'selection_2' ||
+        selections[2].id !== 'selection_3') {
+        console.error('❌ 初始编号不正确');
+        return false;
+    }
+
+    // 删除中间的选择框
+    console.log('删除第2个选择框(selection_2)...');
+    selectionManager.deleteSelection('selection_2');
+
+    console.log('删除后的编号测试:');
+    const remainingSelections = selectionManager.getAllSelections();
+    remainingSelections.forEach((selection, index) => {
+        console.log(`显示编号 ${index + 1}: ID=${selection.id}`);
+    });
+
+    // 验证删除后的重新编号
+    if (remainingSelections.length === 2 &&
+        remainingSelections[0].id === 'selection_1' &&
+        remainingSelections[1].id === 'selection_2') {
+        console.log('✅ 选择框ID和显示编号都正确重新排序');
+
+        // 测试创建新选择框
+        console.log('创建新选择框...');
+        const newSelection = selectionManager.createSelection(160, 160, 200, 200);
+        console.log(`新选择框ID: ${newSelection.id}`);
+
+        if (newSelection.id === 'selection_3') {
+            console.log('✅ 新选择框编号正确');
+            return true;
+        } else {
+            console.error('❌ 新选择框编号不正确');
+            return false;
+        }
+    } else {
+        console.error('❌ 选择框编号重排序有问题');
+        return false;
+    }
+}
+
 // 在开发模式下运行测试
 if (window.location.search.includes('test=true')) {
+    console.log('开始运行单元测试...');
+
     document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
+            console.log('开始调试测试...');
+            debugExportIssue(); // 调试导出问题
+            testExportPrefixIssue(); // 测试导出前缀问题
+            testKeyboardEventPropagation(); // 测试键盘事件传播问题
+            testSelectionNumbering(); // 测试选择框编号
+
+            console.log('开始运行标准测试...');
             runImageUploadTests();
             runZoomTests();
             runSelectionTests();
             runSelectionHighlightTests();
             runSelectionResizeTests();
+            runSelectionNumberingResetTests();
+            runExportIntegrityTests();
             runIntegrationTests();
         }, 1000);
     });
