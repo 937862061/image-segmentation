@@ -1,3 +1,141 @@
+// 调试日志管理器
+class DebugLogger {
+    constructor() {
+        this.logs = [];
+        this.maxLogs = 100;
+    }
+
+    log(level, category, message, data = null) {
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            level: level,
+            category: category,
+            message: message,
+            data: data
+        };
+
+        this.logs.push(logEntry);
+
+        // 保持日志数量在限制内
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+
+        // 输出到控制台
+        const consoleMessage = `[${category}] ${message}`;
+        switch (level) {
+            case 'error':
+                console.error(consoleMessage, data);
+                break;
+            case 'warn':
+                console.warn(consoleMessage, data);
+                break;
+            case 'info':
+                console.info(consoleMessage, data);
+                break;
+            default:
+                console.log(consoleMessage, data);
+        }
+    }
+
+    error(category, message, data) {
+        this.log('error', category, message, data);
+    }
+
+    warn(category, message, data) {
+        this.log('warn', category, message, data);
+    }
+
+    info(category, message, data) {
+        this.log('info', category, message, data);
+    }
+
+    debug(category, message, data) {
+        this.log('debug', category, message, data);
+    }
+
+    getLogs(category = null, level = null) {
+        return this.logs.filter(log => {
+            if (category && log.category !== category) return false;
+            if (level && log.level !== level) return false;
+            return true;
+        });
+    }
+
+    exportLogs() {
+        const logsText = this.logs.map(log =>
+            `${log.timestamp} [${log.level.toUpperCase()}] [${log.category}] ${log.message}${log.data ? '\n' + JSON.stringify(log.data, null, 2) : ''}`
+        ).join('\n\n');
+
+        const blob = new Blob([logsText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `debug-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+}
+
+// 环境检测类
+class EnvironmentChecker {
+    constructor() {
+        this.capabilities = this.detectCapabilities();
+    }
+
+    detectCapabilities() {
+        return {
+            hasFileSystemAccess: 'showDirectoryPicker' in window,
+            isSecureContext: window.isSecureContext,
+            protocol: window.location.protocol,
+            hostname: window.location.hostname,
+            userAgent: navigator.userAgent,
+            supportLevel: this.getSupportLevel()
+        };
+    }
+
+    getSupportLevel() {
+        if (!window.isSecureContext) return 'unsecure_context';
+        if (!('showDirectoryPicker' in window)) return 'api_not_supported';
+        return 'full_support';
+    }
+
+    getRecommendation() {
+        switch (this.capabilities.supportLevel) {
+            case 'unsecure_context':
+                return '请使用HTTPS或localhost访问以启用文件夹选择功能';
+            case 'api_not_supported':
+                return '您的浏览器不支持文件夹选择，建议使用Chrome或Edge浏览器';
+            case 'full_support':
+                return '支持文件夹选择功能';
+            default:
+                return '文件夹选择功能状态未知';
+        }
+    }
+
+    getStatusIcon() {
+        switch (this.capabilities.supportLevel) {
+            case 'full_support': return '✅';
+            case 'api_not_supported': return '⚠️';
+            case 'unsecure_context': return '🔒';
+            default: return '❌';
+        }
+    }
+
+    logEnvironmentInfo() {
+        console.log('环境检测结果:', {
+            支持级别: this.capabilities.supportLevel,
+            安全上下文: this.capabilities.isSecureContext,
+            协议: this.capabilities.protocol,
+            主机名: this.capabilities.hostname,
+            文件系统API: this.capabilities.hasFileSystemAccess,
+            建议: this.getRecommendation()
+        });
+    }
+}
+
 // 主应用类
 class ImageCropApp {
     constructor() {
@@ -8,6 +146,8 @@ class ImageCropApp {
         this.canvasRenderer = null;
         this.eventHandler = null;
         this.exportManager = null;
+        this.environmentChecker = new EnvironmentChecker();
+        this.debugLogger = new DebugLogger();
     }
 
     init() {
@@ -46,7 +186,614 @@ class ImageCropApp {
             this.render();
         });
 
+        // 记录环境信息
+        this.environmentChecker.logEnvironmentInfo();
+        this.debugLogger.info('应用初始化', '图片裁剪工具初始化完成', {
+            环境支持级别: this.environmentChecker.capabilities.supportLevel,
+            安全上下文: this.environmentChecker.capabilities.isSecureContext,
+            文件系统API: this.environmentChecker.capabilities.hasFileSystemAccess
+        });
+
         console.log('图片裁剪工具初始化完成');
+    }
+
+    // 显示导出对话框
+    showExportDialog() {
+        if (this.selectionManager.getAllSelections().length === 0) {
+            this.showStatus('请先创建选择框', 'error');
+            return;
+        }
+
+        // 创建导出对话框
+        const dialog = this.createExportDialog();
+        document.body.appendChild(dialog);
+    }
+
+    // 创建导出对话框
+    createExportDialog() {
+        const overlay = document.createElement('div');
+        overlay.className = 'export-dialog-overlay';
+        overlay.innerHTML = `
+            <div class="export-dialog">
+                <div class="export-dialog-header">
+                    <h3>导出设置</h3>
+                    <button class="close-btn" onclick="this.closest('.export-dialog-overlay').remove()">×</button>
+                </div>
+                <div class="export-dialog-content">
+                    <div class="environment-status ${this.environmentChecker.capabilities.supportLevel}">
+                        <div class="status-icon">${this.environmentChecker.getStatusIcon()}</div>
+                        <div class="status-text">${this.environmentChecker.getRecommendation()}</div>
+                        ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ?
+                '<div class="fallback-notice">将使用浏览器默认下载方式</div>' : ''}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>导出方式:</label>
+                        <div class="export-method-options">
+                            <label class="radio-option">
+                                <input type="radio" name="exportMethod" value="download" checked>
+                                <span>直接下载到默认文件夹</span>
+                            </label>
+                            <label class="radio-option" ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ? 'style="opacity: 0.5; pointer-events: none;"' : ''}>
+                                <input type="radio" name="exportMethod" value="folder" ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ? 'disabled' : ''}>
+                                <span>选择文件夹保存</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" id="folderSelectGroup" style="display: none;">
+                        <label>保存位置:</label>
+                        <button id="selectFolderBtn" class="btn btn-secondary">选择文件夹</button>
+                        <div id="selectedFolder" class="selected-folder"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>文件名前缀:</label>
+                        <input type="text" id="filenamePrefix" value="" placeholder="输入文件名前缀">
+                    </div>
+
+                    <div class="form-group">
+                        <label>文件格式:</label>
+                        <select id="fileFormat">
+                            <option value="png">PNG (推荐)</option>
+                            <option value="jpeg">JPEG</option>
+                            <option value="webp">WebP</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="qualityGroup" style="display: none;">
+                        <label>图片质量:</label>
+                        <input type="range" id="imageQuality" min="0.1" max="1" step="0.1" value="0.9">
+                        <span id="qualityValue">90%</span>
+                    </div>
+
+                    <div class="export-info">
+                        <div>将导出 <strong id="exportCount">${this.selectionManager.getAllSelections().length}</strong> 个选择框</div>
+                        <div>图片数量: <strong>${this.imageManager.hasImage() ? 1 : 0}</strong></div>
+                    </div>
+                    
+                    <div class="debug-info-toggle">
+                        <button type="button" class="btn btn-link" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                            🔧 显示调试信息
+                        </button>
+                        <div class="debug-info" style="display: none;">
+                            <h4>环境信息</h4>
+                            <div class="debug-item">
+                                <span class="debug-label">支持级别:</span>
+                                <span class="debug-value">${this.environmentChecker.capabilities.supportLevel}</span>
+                            </div>
+                            <div class="debug-item">
+                                <span class="debug-label">安全上下文:</span>
+                                <span class="debug-value">${this.environmentChecker.capabilities.isSecureContext ? '是' : '否'}</span>
+                            </div>
+                            <div class="debug-item">
+                                <span class="debug-label">协议:</span>
+                                <span class="debug-value">${this.environmentChecker.capabilities.protocol}</span>
+                            </div>
+                            <div class="debug-item">
+                                <span class="debug-label">主机名:</span>
+                                <span class="debug-value">${this.environmentChecker.capabilities.hostname}</span>
+                            </div>
+                            <div class="debug-item">
+                                <span class="debug-label">文件系统API:</span>
+                                <span class="debug-value">${this.environmentChecker.capabilities.hasFileSystemAccess ? '支持' : '不支持'}</span>
+                            </div>
+                            <div class="debug-item">
+                                <span class="debug-label">用户代理:</span>
+                                <span class="debug-value" style="font-size: 11px; word-break: break-all;">${this.environmentChecker.capabilities.userAgent}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="export-dialog-footer">
+                    <button class="btn btn-secondary" onclick="this.closest('.export-dialog-overlay').remove()">取消</button>
+                    <button class="btn btn-primary" id="confirmExportBtn">开始导出</button>
+                </div>
+            </div>
+        `;
+
+        // 添加事件监听器
+        this.setupExportDialogEvents(overlay);
+
+        return overlay;
+    }
+
+    // 设置导出对话框事件
+    setupExportDialogEvents(overlay) {
+        const exportMethodRadios = overlay.querySelectorAll('input[name="exportMethod"]');
+        const folderSelectGroup = overlay.querySelector('#folderSelectGroup');
+        const selectFolderBtn = overlay.querySelector('#selectFolderBtn');
+        const fileFormatSelect = overlay.querySelector('#fileFormat');
+        const qualityGroup = overlay.querySelector('#qualityGroup');
+        const imageQuality = overlay.querySelector('#imageQuality');
+        const qualityValue = overlay.querySelector('#qualityValue');
+        const confirmExportBtn = overlay.querySelector('#confirmExportBtn');
+
+        // 验证关键DOM元素存在
+        if (!folderSelectGroup || !selectFolderBtn || !fileFormatSelect ||
+            !qualityGroup || !imageQuality || !qualityValue || !confirmExportBtn) {
+            console.error('导出对话框: 缺少必要的DOM元素');
+            return;
+        }
+
+        let selectedDirectoryHandle = null;
+
+        // 根据环境支持情况初始化UI状态
+        if (this.environmentChecker.capabilities.supportLevel !== 'full_support') {
+            // 禁用文件夹选择选项
+            const folderRadio = overlay.querySelector('input[value="folder"]');
+            if (folderRadio) {
+                folderRadio.disabled = true;
+                folderRadio.parentElement.style.opacity = '0.5';
+                folderRadio.parentElement.style.pointerEvents = 'none';
+            }
+
+            // 确保默认选择下载模式
+            const downloadRadio = overlay.querySelector('input[value="download"]');
+            if (downloadRadio) {
+                downloadRadio.checked = true;
+            }
+
+            // 隐藏文件夹选择组
+            folderSelectGroup.style.display = 'none';
+        }
+
+        // 导出方式切换
+        exportMethodRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.value === 'folder') {
+                    // 检查环境支持情况
+                    if (this.environmentChecker.capabilities.supportLevel === 'full_support') {
+                        folderSelectGroup.style.display = 'block';
+                    } else {
+                        // 环境不支持，自动切换回下载模式
+                        overlay.querySelector('input[value="download"]').checked = true;
+                        folderSelectGroup.style.display = 'none';
+                        this.showStatus('当前环境不支持文件夹选择，已切换到默认下载', 'warning');
+                    }
+                } else {
+                    folderSelectGroup.style.display = 'none';
+                }
+            });
+        });
+
+        // 文件格式切换
+        fileFormatSelect.addEventListener('change', () => {
+            if (fileFormatSelect.value === 'jpeg' || fileFormatSelect.value === 'webp') {
+                qualityGroup.style.display = 'block';
+            } else {
+                qualityGroup.style.display = 'none';
+            }
+        });
+
+        // 质量滑块
+        imageQuality.addEventListener('input', () => {
+            qualityValue.textContent = Math.round(imageQuality.value * 100) + '%';
+        });
+
+        // 选择文件夹按钮
+        selectFolderBtn.addEventListener('click', async () => {
+            // 首先检查环境支持情况
+            const envCapabilities = this.environmentChecker.capabilities;
+
+            if (envCapabilities.supportLevel !== 'full_support') {
+                let message = '';
+                let suggestion = '';
+
+                switch (envCapabilities.supportLevel) {
+                    case 'unsecure_context':
+                        message = '文件夹选择需要安全上下文(HTTPS或localhost)';
+                        suggestion = '请使用 https:// 或在 localhost 环境中访问';
+                        break;
+                    case 'api_not_supported':
+                        message = '您的浏览器不支持文件夹选择API';
+                        suggestion = '建议使用 Chrome 86+ 或 Edge 86+ 浏览器';
+                        break;
+                    default:
+                        message = '文件夹选择功能不可用';
+                        suggestion = '将自动使用默认下载方式';
+                }
+
+                this.showStatus(message + ' - ' + suggestion, 'warning');
+                console.log('环境检测详情:', envCapabilities);
+
+                // 自动切换到下载模式
+                overlay.querySelector('input[value="download"]').checked = true;
+                folderSelectGroup.style.display = 'none';
+                return;
+            }
+
+            try {
+                // 尝试选择文件夹，添加更多选项
+                selectedDirectoryHandle = await window.showDirectoryPicker({
+                    mode: 'readwrite',
+                    startIn: 'downloads'
+                });
+
+                const selectedFolder = overlay.querySelector('#selectedFolder');
+                if (selectedFolder) {
+                    selectedFolder.innerHTML = `<div class="folder-info">✅ 已选择文件夹: <strong>${selectedDirectoryHandle.name}</strong></div>`;
+                    this.showStatus('文件夹选择成功', 'success');
+                    console.log('选择的文件夹:', selectedDirectoryHandle.name);
+                } else {
+                    console.warn('导出对话框: 未找到selectedFolder元素');
+                    this.showStatus('UI元素缺失，但文件夹已选择', 'warning');
+                }
+
+            } catch (error) {
+                this.handleFolderSelectionError(error, overlay, folderSelectGroup);
+            }
+        });
+
+        // 确认导出按钮
+        confirmExportBtn.addEventListener('click', async () => {
+            const exportMethodElement = overlay.querySelector('input[name="exportMethod"]:checked');
+            const filenamePrefixElement = overlay.querySelector('#filenamePrefix');
+
+            if (!exportMethodElement || !filenamePrefixElement) {
+                console.error('导出对话框: 缺少必要的表单元素');
+                this.showStatus('导出失败: 表单元素缺失', 'error');
+                return;
+            }
+
+            const exportMethod = exportMethodElement.value;
+            const prefix = filenamePrefixElement.value || 'crop';
+            const format = fileFormatSelect.value;
+            const quality = parseFloat(imageQuality.value);
+
+            if (exportMethod === 'folder' && !selectedDirectoryHandle) {
+                this.showStatus('请先选择保存文件夹', 'error');
+                return;
+            }
+
+            // 关闭对话框
+            overlay.remove();
+
+            // 开始导出
+            await this.performExport({
+                method: exportMethod,
+                directoryHandle: selectedDirectoryHandle,
+                prefix: prefix,
+                format: format,
+                quality: quality
+            });
+        });
+    }
+
+    // 处理文件夹选择错误
+    handleFolderSelectionError(error, overlay, folderSelectGroup) {
+        const errorInfo = this.classifyFolderSelectionError(error);
+
+        console.log('文件夹选择错误详情:', {
+            错误名称: error.name,
+            错误消息: error.message,
+            错误类型: errorInfo.type,
+            可恢复: errorInfo.recoverable
+        });
+
+        switch (errorInfo.type) {
+            case 'user_cancelled':
+                // 用户取消，不显示错误消息
+                console.log('用户取消了文件夹选择');
+                break;
+
+            case 'permission_denied':
+                this.showStatus('权限被拒绝 - 请检查浏览器设置或重试', 'error');
+                this.showRetryOption(overlay, folderSelectGroup);
+                break;
+
+            case 'security_error':
+                this.showStatus('安全限制阻止了文件夹访问', 'error');
+                this.fallbackToDownload(overlay, folderSelectGroup);
+                break;
+
+            default:
+                this.showStatus(`文件夹选择失败: ${errorInfo.message}`, 'error');
+                if (errorInfo.recoverable) {
+                    this.showRetryOption(overlay, folderSelectGroup);
+                } else {
+                    this.fallbackToDownload(overlay, folderSelectGroup);
+                }
+        }
+    }
+
+    // 分类文件夹选择错误
+    classifyFolderSelectionError(error) {
+        const errorMap = {
+            'AbortError': {
+                type: 'user_cancelled',
+                message: '用户取消了操作',
+                recoverable: true
+            },
+            'NotAllowedError': {
+                type: 'permission_denied',
+                message: '没有权限访问文件系统',
+                recoverable: true
+            },
+            'SecurityError': {
+                type: 'security_error',
+                message: '安全限制阻止了文件夹访问',
+                recoverable: false
+            },
+            'InvalidStateError': {
+                type: 'invalid_state',
+                message: '浏览器状态不允许此操作',
+                recoverable: true
+            }
+        };
+
+        return errorMap[error.name] || {
+            type: 'unknown_error',
+            message: error.message || '未知错误',
+            recoverable: true
+        };
+    }
+
+    // 显示重试选项
+    showRetryOption(overlay, folderSelectGroup) {
+        const selectedFolder = overlay.querySelector('#selectedFolder');
+        if (selectedFolder) {
+            selectedFolder.innerHTML = `
+                <div class="error-info">
+                    <span class="error-icon">⚠️</span>
+                    <span class="error-text">选择失败，可以重试</span>
+                    <button class="btn btn-small retry-btn" onclick="document.querySelector('#selectFolderBtn').click()">重试</button>
+                </div>
+            `;
+        }
+    }
+
+    // 回退到下载模式
+    fallbackToDownload(overlay, folderSelectGroup) {
+        overlay.querySelector('input[value="download"]').checked = true;
+        folderSelectGroup.style.display = 'none';
+        this.showStatus('已切换到默认下载模式', 'info');
+    }
+
+    // 更新导出对话框状态提示
+    updateExportDialogStatus(overlay, message, type = 'info') {
+        let statusElement = overlay.querySelector('.dialog-status');
+        if (!statusElement) {
+            statusElement = document.createElement('div');
+            statusElement.className = 'dialog-status';
+            const content = overlay.querySelector('.export-dialog-content');
+            content.insertBefore(statusElement, content.firstChild.nextSibling);
+        }
+
+        statusElement.className = `dialog-status ${type}`;
+        statusElement.innerHTML = `
+            <div class="status-icon">${this.getStatusIcon(type)}</div>
+            <div class="status-message">${message}</div>
+        `;
+
+        // 自动隐藏信息类型的状态
+        if (type === 'info') {
+            setTimeout(() => {
+                if (statusElement.parentNode) {
+                    statusElement.remove();
+                }
+            }, 3000);
+        }
+    }
+
+    // 获取状态图标
+    getStatusIcon(type) {
+        const icons = {
+            'success': '✅',
+            'error': '❌',
+            'warning': '⚠️',
+            'info': 'ℹ️'
+        };
+        return icons[type] || 'ℹ️';
+    }
+
+    // 执行导出
+    async performExport(config) {
+        const selections = this.selectionManager.getAllSelections();
+        let exportCount = 0;
+        let failedCount = 0;
+        let fallbackUsed = false;
+
+        try {
+            this.showStatus('正在导出...', 'info');
+            console.log('开始导出，配置:', config);
+
+            for (let i = 0; i < selections.length; i++) {
+                const selection = selections[i];
+                const filename = `${config.prefix}_${i + 1}.${config.format}`;
+
+                try {
+                    await this.exportSingleSelection(selection, filename, config);
+                    exportCount++;
+
+                    // 显示进度
+                    this.showStatus(`导出进度: ${exportCount}/${selections.length}`, 'info');
+
+                } catch (error) {
+                    console.error(`导出第 ${i + 1} 个文件失败:`, error);
+                    failedCount++;
+
+                    // 如果是文件夹保存失败，尝试回退到下载模式
+                    if (config.method === 'folder' && !fallbackUsed) {
+                        console.log('文件夹保存失败，尝试回退到下载模式');
+                        fallbackUsed = true;
+
+                        // 创建回退配置
+                        const fallbackConfig = {
+                            ...config,
+                            method: 'download',
+                            directoryHandle: null
+                        };
+
+                        try {
+                            await this.exportSingleSelection(selection, filename, fallbackConfig);
+                            exportCount++;
+                            this.showStatus(`文件夹保存失败，已切换到下载模式 (${exportCount}/${selections.length})`, 'warning');
+                        } catch (fallbackError) {
+                            console.error('回退到下载模式也失败:', fallbackError);
+                            this.showStatus(`文件 ${filename} 导出完全失败`, 'error');
+                        }
+                    } else {
+                        this.showStatus(`文件 ${filename} 导出失败: ${error.message}`, 'error');
+                    }
+                }
+            }
+
+            // 显示最终结果
+            if (exportCount === selections.length) {
+                const message = fallbackUsed ?
+                    `成功导出 ${exportCount} 个文件 (部分使用了下载模式)` :
+                    `成功导出 ${exportCount} 个文件`;
+                this.showStatus(message, 'success');
+            } else if (exportCount > 0) {
+                this.showStatus(`部分成功：导出了 ${exportCount}/${selections.length} 个文件，${failedCount} 个失败`, 'warning');
+            } else {
+                this.showStatus('导出失败：没有文件被成功导出', 'error');
+            }
+
+        } catch (error) {
+            console.error('导出过程发生严重错误:', error);
+            this.showStatus('导出失败: ' + error.message, 'error');
+        }
+    }
+
+    // 导出单个选择框
+    async exportSingleSelection(selection, filename, config) {
+        return new Promise((resolve, reject) => {
+            try {
+                // 创建临时Canvas
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+
+                // 计算选择框在原始图片上的位置和大小
+                const imageData = this.imageManager.getImageData();
+                if (!imageData) {
+                    reject(new Error('没有图片数据'));
+                    return;
+                }
+
+                const cropX = selection.x;
+                const cropY = selection.y;
+                const cropWidth = selection.width;
+                const cropHeight = selection.height;
+
+                // 设置临时Canvas尺寸
+                tempCanvas.width = cropWidth;
+                tempCanvas.height = cropHeight;
+
+                // 绘制裁剪区域
+                tempCtx.drawImage(
+                    imageData.image,
+                    cropX, cropY, cropWidth, cropHeight,
+                    0, 0, cropWidth, cropHeight
+                );
+
+                // 设置导出格式和质量
+                const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
+                    config.format === 'webp' ? 'image/webp' : 'image/png';
+                const quality = config.format === 'png' ? undefined : config.quality;
+
+                // 转换为Blob
+                tempCanvas.toBlob(async (blob) => {
+                    if (blob) {
+                        try {
+                            if (config.method === 'folder' && config.directoryHandle) {
+                                await this.saveToDirectory(blob, filename, config.directoryHandle);
+                            } else {
+                                this.downloadBlob(blob, filename);
+                            }
+                            resolve();
+                        } catch (saveError) {
+                            console.error(`保存文件 ${filename} 失败:`, saveError);
+                            reject(saveError);
+                        }
+                    } else {
+                        reject(new Error('图片转换失败'));
+                    }
+                }, mimeType, quality);
+
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    // 保存到指定文件夹
+    async saveToDirectory(blob, filename, directoryHandle) {
+        try {
+            console.log(`尝试保存文件到文件夹: ${filename}`);
+
+            // 检查目录句柄是否有效
+            if (!directoryHandle) {
+                throw new Error('目录句柄无效');
+            }
+
+            // 尝试获取文件句柄
+            const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+            console.log(`成功获取文件句柄: ${filename}`);
+
+            // 创建可写流
+            const writable = await fileHandle.createWritable();
+            console.log(`成功创建可写流: ${filename}`);
+
+            // 写入数据
+            await writable.write(blob);
+            await writable.close();
+
+            console.log(`文件保存成功: ${filename}`);
+
+        } catch (error) {
+            console.error('保存到文件夹失败:', {
+                文件名: filename,
+                错误名称: error.name,
+                错误消息: error.message,
+                目录句柄: directoryHandle ? '有效' : '无效'
+            });
+
+            // 根据错误类型提供不同的处理
+            if (error.name === 'NotAllowedError') {
+                console.log('权限被拒绝，抛出错误以便上层处理');
+                throw new Error('文件夹写入权限被拒绝');
+            } else if (error.name === 'AbortError') {
+                console.log('操作被取消，抛出错误以便上层处理');
+                throw new Error('文件保存操作被取消');
+            } else {
+                console.log('其他错误，抛出以便上层回退处理');
+                throw new Error(`文件保存失败: ${error.message}`);
+            }
+        }
+    }
+
+    // 下载Blob文件
+    downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     resizeCanvas() {
@@ -81,7 +828,7 @@ class ImageCropApp {
         // 导出按钮事件
         const exportBtn = document.getElementById('exportBtn');
         exportBtn.addEventListener('click', () => {
-            this.exportSelections();
+            this.showExportDialog();
         });
 
         // 缩放按钮事件
