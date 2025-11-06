@@ -618,13 +618,20 @@ class ImageCropApp {
             this.showStatus('正在导出...', 'info');
             console.log('开始导出，配置:', config);
 
+            console.log(`[导出] 开始循环，总共 ${selections.length} 个文件`);
+            
             for (let i = 0; i < selections.length; i++) {
-                const selection = selections[i];
-                const filename = `${config.prefix}_${i + 1}.${config.format}`;
+                try {
+                    const selection = selections[i];
+                    const filename = `${config.prefix}_${i + 1}.${config.format}`;
+
+                    console.log(`[导出] ========== 第 ${i + 1}/${selections.length} 个文件 ==========`);
+                    console.log(`[导出] 文件名: ${filename}`);
 
                 try {
                     await this.exportSingleSelection(selection, filename, config);
                     exportCount++;
+                    console.log(`[导出] 成功导出第 ${i + 1} 个文件: ${filename}`);
 
                     // 显示进度
                     this.showStatus(`导出进度: ${exportCount}/${selections.length}`, 'info');
@@ -633,38 +640,48 @@ class ImageCropApp {
                     if (config.method === 'folder' && i < selections.length - 1) {
                         // 每10个文件添加一个较长的延迟
                         if ((i + 1) % 10 === 0) {
-                            console.log(`已导出 ${i + 1} 个文件，暂停500ms...`);
+                            console.log(`[导出] 已导出 ${i + 1} 个文件，暂停500ms...`);
                             await new Promise(resolve => setTimeout(resolve, 500));
+                            console.log(`[导出] 延迟结束，继续导出第 ${i + 2} 个文件`);
                         } else {
                             // 其他文件之间添加短延迟
                             await new Promise(resolve => setTimeout(resolve, 100));
                         }
                     }
+                    
+                    // 确保循环继续
+                    console.log(`[导出] 准备导出下一个文件 (当前: ${i + 1}, 下一个: ${i + 2})`);
 
                 } catch (error) {
-                    console.error(`导出第 ${i + 1} 个文件失败:`, error);
+                    console.error(`[导出] 第 ${i + 1} 个文件失败:`, error);
                     failedCount++;
 
                     // 如果是文件夹保存失败，尝试重试一次
                     if (config.method === 'folder') {
-                        console.log(`重试保存文件: ${filename}`);
+                        console.log(`[导出] 重试保存文件 ${i + 1}: ${filename}`);
                         try {
                             // 等待一下再重试
                             await new Promise(resolve => setTimeout(resolve, 200));
                             await this.exportSingleSelection(selection, filename, config);
                             exportCount++;
                             failedCount--; // 重试成功，减少失败计数
+                            console.log(`[导出] 重试成功第 ${i + 1} 个文件: ${filename}`);
                             this.showStatus(`重试成功 (${exportCount}/${selections.length})`, 'info');
                             continue; // 继续下一个文件
                         } catch (retryError) {
-                            console.error('重试失败:', retryError);
+                            console.error(`[导出] 重试失败第 ${i + 1} 个文件:`, retryError);
                         }
                     }
 
-                    // 如果重试失败或不是文件夹模式，尝试回退到下载模式
-                    if (config.method === 'folder' && !fallbackUsed) {
-                        console.log('文件夹保存失败，尝试回退到下载模式');
-                        fallbackUsed = true;
+                    // 如果重试失败，尝试回退到下载模式
+                    if (config.method === 'folder') {
+                        if (!fallbackUsed) {
+                            console.log(`[导出] 首次文件夹保存失败（第 ${i + 1} 个），切换到下载模式`);
+                            fallbackUsed = true;
+                            this.showStatus('文件夹保存遇到问题，切换到下载模式继续...', 'warning');
+                        }
+
+                        console.log(`[导出] 使用下载模式导出第 ${i + 1} 个文件: ${filename}`);
 
                         // 创建回退配置
                         const fallbackConfig = {
@@ -677,27 +694,43 @@ class ImageCropApp {
                             await this.exportSingleSelection(selection, filename, fallbackConfig);
                             exportCount++;
                             failedCount--; // 回退成功，减少失败计数
-                            this.showStatus(`文件夹保存失败，已切换到下载模式 (${exportCount}/${selections.length})`, 'warning');
+                            console.log(`[导出] 下载模式成功导出第 ${i + 1} 个文件: ${filename}`);
                         } catch (fallbackError) {
-                            console.error('回退到下载模式也失败:', fallbackError);
+                            console.error(`[导出] 下载模式也失败第 ${i + 1} 个文件:`, fallbackError);
                             this.showStatus(`文件 ${filename} 导出完全失败`, 'error');
                         }
-                    } else if (!fallbackUsed) {
+                    } else {
                         this.showStatus(`文件 ${filename} 导出失败: ${error.message}`, 'error');
                     }
                 }
+                
+                } catch (outerError) {
+                    // 捕获任何未预期的错误，确保循环继续
+                    console.error(`[导出] 第 ${i + 1} 个文件发生未预期错误:`, outerError);
+                    failedCount++;
+                    this.showStatus(`第 ${i + 1} 个文件发生严重错误，继续下一个...`, 'error');
+                }
+                
+                console.log(`[导出] 第 ${i + 1} 个文件处理完成，继续...`);
             }
+            
+            console.log(`[导出] 循环结束，处理了 ${selections.length} 个文件`);
 
             // 显示最终结果
+            console.log(`[导出] 导出完成 - 成功: ${exportCount}, 失败: ${failedCount}, 总数: ${selections.length}`);
+            
             if (exportCount === selections.length) {
                 const message = fallbackUsed ?
                     `成功导出 ${exportCount} 个文件 (部分使用了下载模式)` :
                     `成功导出 ${exportCount} 个文件`;
                 this.showStatus(message, 'success');
+                console.log(`[导出] ✅ 全部成功！`);
             } else if (exportCount > 0) {
                 this.showStatus(`部分成功：导出了 ${exportCount}/${selections.length} 个文件，${failedCount} 个失败`, 'warning');
+                console.log(`[导出] ⚠️ 部分成功`);
             } else {
                 this.showStatus('导出失败：没有文件被成功导出', 'error');
+                console.log(`[导出] ❌ 全部失败`);
             }
 
         } catch (error) {
