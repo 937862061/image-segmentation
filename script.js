@@ -1358,11 +1358,11 @@ class ImageManager {
                         }
 
                         // 检查图片尺寸是否过大
-                        const maxDimension = 20480; // 8K分辨率限制
-                        if (img.width > maxDimension || img.height > maxDimension) {
-                            reject(new Error(`图片尺寸过大（${img.width}×${img.height}），请选择小于${maxDimension}×${maxDimension}的图片`));
-                            return;
-                        }
+                        // const maxDimension = 204800; // 8K分辨率限制
+                        // if (img.width > maxDimension || img.height > maxDimension) {
+                        //     reject(new Error(`图片尺寸过大（${img.width}×${img.height}），请选择小于${maxDimension}×${maxDimension}的图片`));
+                        //     return;
+                        // }
 
                         this.image = img;
                         this.originalWidth = img.width;
