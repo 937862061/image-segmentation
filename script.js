@@ -261,6 +261,14 @@ class ImageCropApp {
                         </select>
                     </div>
 
+                    <div class="form-group" id="zipOptionGroup" style="display: ${this.selectionManager.getAllSelections().length > 10 ? 'block' : 'none'};">
+                        <label class="checkbox-option">
+                            <input type="checkbox" id="useZipCompression" ${this.selectionManager.getAllSelections().length > 10 ? 'checked' : ''}>
+                            <span>打包为ZIP文件下载 (当前 ${this.selectionManager.getAllSelections().length} 个文件)</span>
+                        </label>
+                        <div class="hint-text">建议：当导出10个以上图片时使用ZIP压缩，更方便快捷</div>
+                    </div>
+
                     <div class="form-group" id="qualityGroup" style="display: none;">
                         <label>图片质量:</label>
                         <input type="range" id="imageQuality" min="0.1" max="1" step="0.1" value="0.9">
@@ -449,6 +457,7 @@ class ImageCropApp {
         confirmExportBtn.addEventListener('click', async () => {
             const exportMethodElement = overlay.querySelector('input[name="exportMethod"]:checked');
             const filenamePrefixElement = overlay.querySelector('#filenamePrefix');
+            const useZipElement = overlay.querySelector('#useZipCompression');
 
             if (!exportMethodElement || !filenamePrefixElement) {
                 console.error('导出对话框: 缺少必要的表单元素');
@@ -460,6 +469,7 @@ class ImageCropApp {
             const prefix = filenamePrefixElement.value || 'crop';
             const format = fileFormatSelect.value;
             const quality = parseFloat(imageQuality.value);
+            const useZip = useZipElement ? useZipElement.checked : false;
 
             if (exportMethod === 'folder' && !selectedDirectoryHandle) {
                 this.showStatus('请先选择保存文件夹', 'error');
@@ -475,7 +485,8 @@ class ImageCropApp {
                 directoryHandle: selectedDirectoryHandle,
                 prefix: prefix,
                 format: format,
-                quality: quality
+                quality: quality,
+                useZip: useZip
             });
         });
     }
@@ -618,6 +629,13 @@ class ImageCropApp {
             this.showStatus('正在导出...', 'info');
             console.log('开始导出，配置:', config);
 
+            // 如果启用ZIP压缩且是下载模式，使用ZIP导出
+            if (config.useZip && config.method === 'download') {
+                console.log('[导出] 使用ZIP压缩模式');
+                await this.performZipExport(config, selections);
+                return;
+            }
+
             console.log(`[导出] 开始循环，总共 ${selections.length} 个文件`);
             
             for (let i = 0; i < selections.length; i++) {
@@ -750,6 +768,151 @@ class ImageCropApp {
             console.error('导出过程发生严重错误:', error);
             this.showStatus('导出失败: ' + error.message, 'error');
         }
+    }
+
+    // ZIP压缩导出
+    async performZipExport(config, selections) {
+        try {
+            // 检查JSZip是否加载
+            if (typeof JSZip === 'undefined') {
+                console.error('JSZip库未加载');
+                this.showStatus('ZIP压缩功能不可用，将使用普通下载', 'warning');
+                // 回退到普通导出
+                config.useZip = false;
+                return this.performExport(config);
+            }
+
+            this.showStatus('正在准备ZIP压缩...', 'info');
+            console.log(`[ZIP导出] 开始，总共 ${selections.length} 个文件`);
+
+            const zip = new JSZip();
+            let successCount = 0;
+            let failedCount = 0;
+
+            // 生成所有图片的Blob并添加到ZIP
+            for (let i = 0; i < selections.length; i++) {
+                try {
+                    const selection = selections[i];
+                    const filename = `${config.prefix}_${i + 1}.${config.format}`;
+                    
+                    console.log(`[ZIP导出] 处理第 ${i + 1}/${selections.length} 个文件: ${filename}`);
+                    this.showStatus(`正在处理: ${i + 1}/${selections.length}`, 'info');
+
+                    // 生成图片Blob
+                    const blob = await this.generateImageBlob(selection, config);
+                    
+                    if (blob) {
+                        // 添加到ZIP
+                        zip.file(filename, blob);
+                        successCount++;
+                        console.log(`[ZIP导出] 成功添加第 ${i + 1} 个文件: ${filename}`);
+                    } else {
+                        failedCount++;
+                        console.error(`[ZIP导出] 第 ${i + 1} 个文件生成失败: ${filename}`);
+                    }
+                } catch (error) {
+                    failedCount++;
+                    console.error(`[ZIP导出] 第 ${i + 1} 个文件处理错误:`, error);
+                }
+            }
+
+            if (successCount === 0) {
+                this.showStatus('ZIP导出失败：没有文件被成功添加', 'error');
+                console.log('[ZIP导出] ✖ 没有文件被成功添加');
+                return;
+            }
+
+            // 生成ZIP文件
+            this.showStatus('正在生成ZIP文件...', 'info');
+            console.log('[ZIP导出] 开始生成ZIP文件');
+            
+            const zipBlob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: {
+                    level: 6  // 压缩级别 0-9，6是默认值，平衡速度和压缩率
+                }
+            }, (metadata) => {
+                // 进度回调
+                const percent = metadata.percent.toFixed(0);
+                this.showStatus(`压缩中: ${percent}%`, 'info');
+                console.log(`[ZIP导出] 压缩进度: ${percent}%`);
+            });
+
+            console.log('[ZIP导出] ZIP文件生成完成，大小:', (zipBlob.size / 1024 / 1024).toFixed(2), 'MB');
+
+            // 下载ZIP文件
+            const zipFilename = `${config.prefix || 'images'}_${new Date().getTime()}.zip`;
+            this.showStatus('正在下载ZIP文件...', 'info');
+            
+            await this.downloadBlob(zipBlob, zipFilename);
+
+            // 显示最终结果
+            console.log(`[ZIP导出] 导出完成 - 成功: ${successCount}, 失败: ${failedCount}, 总数: ${selections.length}`);
+            
+            if (successCount === selections.length) {
+                this.showStatus(`成功导出ZIP文件，包含 ${successCount} 个图片`, 'success');
+                console.log('[ZIP导出] ✔ 全部成功！');
+            } else if (successCount > 0) {
+                this.showStatus(`ZIP导出部分成功：${successCount}/${selections.length} 个文件，${failedCount} 个失败`, 'warning');
+                console.log('[ZIP导出] ⚠ 部分成功');
+            }
+
+        } catch (error) {
+            console.error('[ZIP导出] 严重错误:', error);
+            this.showStatus('ZIP导出失败: ' + error.message, 'error');
+        }
+    }
+
+    // 生成图片Blob（为ZIP导出使用）
+    async generateImageBlob(selection, config) {
+        return new Promise((resolve, reject) => {
+            try {
+                // 创建临时Canvas
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+
+                // 计算选择框在原始图片上的位置和大小
+                const imageData = this.imageManager.getImageData();
+                if (!imageData) {
+                    reject(new Error('没有图片数据'));
+                    return;
+                }
+
+                const cropX = selection.x;
+                const cropY = selection.y;
+                const cropWidth = selection.width;
+                const cropHeight = selection.height;
+
+                // 设置临时Canvas尺寸
+                tempCanvas.width = cropWidth;
+                tempCanvas.height = cropHeight;
+
+                // 绘制裁剪区域
+                tempCtx.drawImage(
+                    imageData.image,
+                    cropX, cropY, cropWidth, cropHeight,
+                    0, 0, cropWidth, cropHeight
+                );
+
+                // 设置导出格式和质量
+                const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
+                    config.format === 'webp' ? 'image/webp' : 'image/png';
+                const quality = config.format === 'png' ? undefined : config.quality;
+
+                // 转换为Blob
+                tempCanvas.toBlob((blob) => {
+                    if (blob) {
+                        resolve(blob);
+                    } else {
+                        reject(new Error('图片转换失败'));
+                    }
+                }, mimeType, quality);
+
+            } catch (error) {
+                reject(error);
+            }
+        });
     }
 
     // 导出单个选择框
