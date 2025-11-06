@@ -628,12 +628,40 @@ class ImageCropApp {
 
                     // 显示进度
                     this.showStatus(`导出进度: ${exportCount}/${selections.length}`, 'info');
+                    
+                    // 添加延迟以避免文件系统API的并发限制
+                    if (config.method === 'folder' && i < selections.length - 1) {
+                        // 每10个文件添加一个较长的延迟
+                        if ((i + 1) % 10 === 0) {
+                            console.log(`已导出 ${i + 1} 个文件，暂停500ms...`);
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        } else {
+                            // 其他文件之间添加短延迟
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                    }
 
                 } catch (error) {
                     console.error(`导出第 ${i + 1} 个文件失败:`, error);
                     failedCount++;
 
-                    // 如果是文件夹保存失败，尝试回退到下载模式
+                    // 如果是文件夹保存失败，尝试重试一次
+                    if (config.method === 'folder') {
+                        console.log(`重试保存文件: ${filename}`);
+                        try {
+                            // 等待一下再重试
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                            await this.exportSingleSelection(selection, filename, config);
+                            exportCount++;
+                            failedCount--; // 重试成功，减少失败计数
+                            this.showStatus(`重试成功 (${exportCount}/${selections.length})`, 'info');
+                            continue; // 继续下一个文件
+                        } catch (retryError) {
+                            console.error('重试失败:', retryError);
+                        }
+                    }
+
+                    // 如果重试失败或不是文件夹模式，尝试回退到下载模式
                     if (config.method === 'folder' && !fallbackUsed) {
                         console.log('文件夹保存失败，尝试回退到下载模式');
                         fallbackUsed = true;
@@ -648,12 +676,13 @@ class ImageCropApp {
                         try {
                             await this.exportSingleSelection(selection, filename, fallbackConfig);
                             exportCount++;
+                            failedCount--; // 回退成功，减少失败计数
                             this.showStatus(`文件夹保存失败，已切换到下载模式 (${exportCount}/${selections.length})`, 'warning');
                         } catch (fallbackError) {
                             console.error('回退到下载模式也失败:', fallbackError);
                             this.showStatus(`文件 ${filename} 导出完全失败`, 'error');
                         }
-                    } else {
+                    } else if (!fallbackUsed) {
                         this.showStatus(`文件 ${filename} 导出失败: ${error.message}`, 'error');
                     }
                 }
@@ -741,11 +770,23 @@ class ImageCropApp {
     // 保存到指定文件夹
     async saveToDirectory(blob, filename, directoryHandle) {
         try {
-            console.log(`尝试保存文件到文件夹: ${filename}`);
+            console.log(`[${new Date().toLocaleTimeString()}] 尝试保存文件到文件夹: ${filename}`);
 
             // 检查目录句柄是否有效
             if (!directoryHandle) {
                 throw new Error('目录句柄无效');
+            }
+
+            // 检查权限状态
+            const permissionStatus = await directoryHandle.queryPermission({ mode: 'readwrite' });
+            console.log(`权限状态: ${permissionStatus}`);
+            
+            if (permissionStatus !== 'granted') {
+                console.log('权限未授予，尝试请求权限');
+                const newPermission = await directoryHandle.requestPermission({ mode: 'readwrite' });
+                if (newPermission !== 'granted') {
+                    throw new Error('文件夹写入权限被拒绝');
+                }
             }
 
             // 尝试获取文件句柄
@@ -760,10 +801,10 @@ class ImageCropApp {
             await writable.write(blob);
             await writable.close();
 
-            console.log(`文件保存成功: ${filename}`);
+            console.log(`[${new Date().toLocaleTimeString()}] 文件保存成功: ${filename}`);
 
         } catch (error) {
-            console.error('保存到文件夹失败:', {
+            console.error(`[${new Date().toLocaleTimeString()}] 保存到文件夹失败:`, {
                 文件名: filename,
                 错误名称: error.name,
                 错误消息: error.message,
