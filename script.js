@@ -636,16 +636,29 @@ class ImageCropApp {
                     // 显示进度
                     this.showStatus(`导出进度: ${exportCount}/${selections.length}`, 'info');
                     
-                    // 添加延迟以避免文件系统API的并发限制
-                    if (config.method === 'folder' && i < selections.length - 1) {
-                        // 每10个文件添加一个较长的延迟
-                        if ((i + 1) % 10 === 0) {
-                            console.log(`[导出] 已导出 ${i + 1} 个文件，暂停500ms...`);
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                            console.log(`[导出] 延迟结束，继续导出第 ${i + 2} 个文件`);
+                    // 添加延迟以避免浏览器下载并发限制和文件系统API限制
+                    if (i < selections.length - 1) {
+                        if (config.method === 'folder') {
+                            // 文件夹保存模式：每10个文件添加一个较长的延迟
+                            if ((i + 1) % 10 === 0) {
+                                console.log(`[导出] 已导出 ${i + 1} 个文件，暂停500ms...`);
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                console.log(`[导出] 延迟结束，继续导出第 ${i + 2} 个文件`);
+                            } else {
+                                // 其他文件之间添加短延迟
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                            }
                         } else {
-                            // 其他文件之间添加短延迟
-                            await new Promise(resolve => setTimeout(resolve, 100));
+                            // 下载模式：添加更长的延迟以避免浏览器限制
+                            // 浏览器对同时触发的下载有限制，需要适当延迟
+                            if ((i + 1) % 5 === 0) {
+                                // 每5个文件添加较长延迟
+                                console.log(`[导出] 已下载 ${i + 1} 个文件，暂停300ms避免浏览器限制...`);
+                                await new Promise(resolve => setTimeout(resolve, 300));
+                            } else {
+                                // 每个文件之间添加基础延迟
+                                await new Promise(resolve => setTimeout(resolve, 150));
+                            }
                         }
                     }
                     
@@ -782,7 +795,8 @@ class ImageCropApp {
                             if (config.method === 'folder' && config.directoryHandle) {
                                 await this.saveToDirectory(blob, filename, config.directoryHandle);
                             } else {
-                                this.downloadBlob(blob, filename);
+                                // 等待下载操作完成
+                                await this.downloadBlob(blob, filename);
                             }
                             resolve();
                         } catch (saveError) {
@@ -858,16 +872,27 @@ class ImageCropApp {
         }
     }
 
-    // 下载Blob文件
+    // 下载Blob文件（改进版，确保下载完成）
     downloadBlob(blob, filename) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        return new Promise((resolve) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            
+            // 点击下载
+            a.click();
+            
+            // 延迟清理，确保下载已启动
+            // 使用较长的延迟以确保浏览器有足够时间处理下载请求
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                resolve();
+            }, 100); // 100ms延迟，确保下载请求已被浏览器处理
+        });
     }
 
     resizeCanvas() {
