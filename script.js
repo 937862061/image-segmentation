@@ -871,38 +871,48 @@ class ImageCropApp {
                 // 创建临时Canvas
                 const tempCanvas = document.createElement('canvas');
                 const tempCtx = tempCanvas.getContext('2d');
+                
+                // 禁用图像平滑以保持清晰度
+                tempCtx.imageSmoothingEnabled = false;
 
-                // 计算选择框在原始图片上的位置和大小
+                // 获取图片数据
                 const imageData = this.imageManager.getImageData();
                 if (!imageData) {
                     reject(new Error('没有图片数据'));
                     return;
                 }
 
+                // selection的坐标已经是图片原始坐标，直接使用
                 const cropX = selection.x;
                 const cropY = selection.y;
                 const cropWidth = selection.width;
                 const cropHeight = selection.height;
 
-                // 设置临时Canvas尺寸
-                tempCanvas.width = cropWidth;
-                tempCanvas.height = cropHeight;
+                console.log(`[ZIP导出] 裁剪区域: (${cropX.toFixed(0)}, ${cropY.toFixed(0)}), 尺寸: ${cropWidth.toFixed(0)}x${cropHeight.toFixed(0)}`);
 
-                // 绘制裁剪区域
+                // 设置临时Canvas尺寸（使用整数避免模糊）
+                tempCanvas.width = Math.round(cropWidth);
+                tempCanvas.height = Math.round(cropHeight);
+
+                // 直接从原始图像裁剪
                 tempCtx.drawImage(
                     imageData.image,
-                    cropX, cropY, cropWidth, cropHeight,
-                    0, 0, cropWidth, cropHeight
+                    Math.round(cropX), Math.round(cropY), 
+                    Math.round(cropWidth), Math.round(cropHeight),
+                    0, 0, 
+                    Math.round(cropWidth), Math.round(cropHeight)
                 );
 
                 // 设置导出格式和质量
                 const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
                     config.format === 'webp' ? 'image/webp' : 'image/png';
-                const quality = config.format === 'png' ? undefined : config.quality;
+                // PNG不需要质量参数（无损），JPEG/WebP最低使用95%质量
+                const quality = config.format === 'png' ? undefined : Math.max(config.quality, 0.95);
 
                 // 转换为Blob
                 tempCanvas.toBlob((blob) => {
                     if (blob) {
+                        console.log(`[ZIP导出] 生成Blob成功, 大小: ${(blob.size / 1024).toFixed(2)}KB`);
                         resolve(blob);
                     } else {
                         reject(new Error('图片转换失败'));
@@ -922,39 +932,49 @@ class ImageCropApp {
                 // 创建临时Canvas
                 const tempCanvas = document.createElement('canvas');
                 const tempCtx = tempCanvas.getContext('2d');
+                
+                // 禁用图像平滑以保持清晰度
+                tempCtx.imageSmoothingEnabled = false;
 
-                // 计算选择框在原始图片上的位置和大小
+                // 获取图片数据
                 const imageData = this.imageManager.getImageData();
                 if (!imageData) {
                     reject(new Error('没有图片数据'));
                     return;
                 }
 
+                // selection的坐标已经是图片原始坐标，直接使用
                 const cropX = selection.x;
                 const cropY = selection.y;
                 const cropWidth = selection.width;
                 const cropHeight = selection.height;
 
-                // 设置临时Canvas尺寸
-                tempCanvas.width = cropWidth;
-                tempCanvas.height = cropHeight;
+                console.log(`[导出] 裁剪区域: (${cropX.toFixed(0)}, ${cropY.toFixed(0)}), 尺寸: ${cropWidth.toFixed(0)}x${cropHeight.toFixed(0)}`);
 
-                // 绘制裁剪区域
+                // 设置临时Canvas尺寸（使用整数避免模糊）
+                tempCanvas.width = Math.round(cropWidth);
+                tempCanvas.height = Math.round(cropHeight);
+
+                // 直接从原始图像裁剪
                 tempCtx.drawImage(
                     imageData.image,
-                    cropX, cropY, cropWidth, cropHeight,
-                    0, 0, cropWidth, cropHeight
+                    Math.round(cropX), Math.round(cropY), 
+                    Math.round(cropWidth), Math.round(cropHeight),
+                    0, 0, 
+                    Math.round(cropWidth), Math.round(cropHeight)
                 );
 
                 // 设置导出格式和质量
                 const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
                     config.format === 'webp' ? 'image/webp' : 'image/png';
-                const quality = config.format === 'png' ? undefined : config.quality;
+                // PNG不需要质量参数（无损），JPEG/WebP最低使用95%质量
+                const quality = config.format === 'png' ? undefined : Math.max(config.quality, 0.95);
 
-                // 转换为Blob
+                // 转换为Blob（确保最高质量）
                 tempCanvas.toBlob(async (blob) => {
                     if (blob) {
                         try {
+                            console.log(`[导出] 生成Blob成功, 大小: ${(blob.size / 1024).toFixed(2)}KB`);
                             if (config.method === 'folder' && config.directoryHandle) {
                                 await this.saveToDirectory(blob, filename, config.directoryHandle);
                             } else {
