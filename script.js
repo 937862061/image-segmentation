@@ -148,6 +148,10 @@ class ImageCropApp {
         this.exportManager = null;
         this.environmentChecker = new EnvironmentChecker();
         this.debugLogger = new DebugLogger();
+        // 图片信息只用于工作台展示，不改变原有裁剪与导出数据结构。
+        this.imageFile = null;
+        this.isLoading = false;
+        this.statusTimer = null;
     }
 
     init() {
@@ -182,7 +186,15 @@ class ImageCropApp {
 
         // 监听窗口大小变化
         window.addEventListener('resize', () => {
+            const previousWidth = this.canvas.width;
+            const previousHeight = this.canvas.height;
             this.resizeCanvas();
+            // 响应式布局切换时保留画面中心与当前比例，不让图片停留在旧容器坐标。
+            if (this.imageManager.hasImage()) {
+                this.imageManager.offsetX += (this.canvas.width - previousWidth) / 2;
+                this.imageManager.offsetY += (this.canvas.height - previousHeight) / 2;
+                this.imageManager.constrainImagePosition();
+            }
             this.render();
         });
 
@@ -207,17 +219,24 @@ class ImageCropApp {
         // 创建导出对话框
         const dialog = this.createExportDialog();
         document.body.appendChild(dialog);
+        // 原生对话框负责焦点限制和 Escape 关闭；关闭后恢复到导出入口。
+        dialog.addEventListener('close', () => {
+            dialog.remove();
+            document.getElementById('exportBtn').focus();
+        });
+        dialog.showModal();
     }
 
     // 创建导出对话框
     createExportDialog() {
-        const overlay = document.createElement('div');
+        const overlay = document.createElement('dialog');
         overlay.className = 'export-dialog-overlay';
+        overlay.setAttribute('aria-labelledby', 'exportDialogTitle');
         overlay.innerHTML = `
             <div class="export-dialog">
                 <div class="export-dialog-header">
-                    <h3>导出设置</h3>
-                    <button class="close-btn" onclick="this.closest('.export-dialog-overlay').remove()">×</button>
+                    <h3 id="exportDialogTitle">导出设置</h3>
+                    <button class="close-btn" aria-label="关闭导出设置" onclick="this.closest('dialog').close()">×</button>
                 </div>
                 <div class="export-dialog-content">
                     <div class="environment-status ${this.environmentChecker.capabilities.supportLevel}">
@@ -248,12 +267,12 @@ class ImageCropApp {
                     </div>
 
                     <div class="form-group">
-                        <label>文件名前缀:</label>
+                        <label for="filenamePrefix">文件名前缀:</label>
                         <input type="text" id="filenamePrefix" value="" placeholder="输入文件名前缀">
                     </div>
 
                     <div class="form-group">
-                        <label>文件格式:</label>
+                        <label for="fileFormat">文件格式:</label>
                         <select id="fileFormat">
                             <option value="png">PNG (推荐)</option>
                             <option value="jpeg">JPEG</option>
@@ -270,7 +289,7 @@ class ImageCropApp {
                     </div>
 
                     <div class="form-group" id="qualityGroup" style="display: none;">
-                        <label>图片质量:</label>
+                        <label for="imageQuality">图片质量:</label>
                         <input type="range" id="imageQuality" min="0.1" max="1" step="0.1" value="0.9">
                         <span id="qualityValue">90%</span>
                     </div>
@@ -282,7 +301,7 @@ class ImageCropApp {
                     
                     <div class="debug-info-toggle">
                         <button type="button" class="btn btn-link" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
-                            🔧 显示调试信息
+                            查看环境信息
                         </button>
                         <div class="debug-info" style="display: none;">
                             <h4>环境信息</h4>
@@ -314,7 +333,7 @@ class ImageCropApp {
                     </div>
                 </div>
                 <div class="export-dialog-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.export-dialog-overlay').remove()">取消</button>
+                    <button class="btn btn-secondary" onclick="this.closest('dialog').close()">取消</button>
                     <button class="btn btn-primary" id="confirmExportBtn">开始导出</button>
                 </div>
             </div>
@@ -477,7 +496,7 @@ class ImageCropApp {
             }
 
             // 关闭对话框
-            overlay.remove();
+            overlay.close();
 
             // 开始导出
             await this.performExport({
@@ -1099,12 +1118,16 @@ class ImageCropApp {
         uploadBtn.addEventListener('click', () => {
             imageInput.click();
         });
+        // 空状态上传入口复用同一个文件输入，校验与加载逻辑保持一致。
+        document.getElementById('welcomeUploadBtn').addEventListener('click', () => imageInput.click());
 
         imageInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
                 this.loadImage(file);
             }
+            // 清空输入值，允许用户再次选择相同文件。
+            imageInput.value = '';
         });
 
         // 导出按钮事件
@@ -1173,6 +1196,7 @@ class ImageCropApp {
 
         // Canvas事件
         this.canvas.addEventListener('mousedown', (e) => {
+            this.canvas.focus({ preventScroll: true });
             this.eventHandler.handleMouseDown(e);
         });
 
@@ -1214,11 +1238,17 @@ class ImageCropApp {
     }
 
     loadImage(file) {
+        if (this.isLoading) return;
+        // 加载期间禁用工具，避免未完成读取时继续操作旧画布。
+        this.isLoading = true;
         // 重置应用状态
         this.resetApplication();
+        this.updateUI();
 
         this.imageManager.loadImage(file)
             .then(() => {
+                this.imageFile = file;
+                this.isLoading = false;
                 this.hideWelcomeMessage();
                 this.resizeCanvas(); // 重新调整Canvas尺寸
                 this.render();
@@ -1226,6 +1256,10 @@ class ImageCropApp {
                 this.showStatus('图片加载成功', 'success');
             })
             .catch((error) => {
+                this.isLoading = false;
+                document.getElementById('welcomeMessage').style.display = this.imageManager.hasImage() ? 'none' : 'flex';
+                this.render();
+                this.updateUI();
                 this.showStatus('图片加载失败: ' + error.message, 'error');
             });
     }
@@ -1258,7 +1292,26 @@ class ImageCropApp {
         // 更新导出按钮状态
         const exportBtn = document.getElementById('exportBtn');
         const hasSelections = this.selectionManager.getAllSelections().length > 0;
-        exportBtn.disabled = !hasSelections || !this.imageManager.hasImage();
+        const hasImage = this.imageManager.hasImage();
+        exportBtn.disabled = this.isLoading || !hasSelections || !hasImage;
+
+        // 页面展示使用 textContent，文件名含特殊字符时也不会变成 HTML。
+        document.getElementById('uploadBtn').disabled = this.isLoading;
+        document.getElementById('welcomeUploadBtn').disabled = this.isLoading;
+        document.getElementById('imageState').textContent = this.isLoading ? '加载中' : hasImage ? '已导入' : '未上传';
+        const imageName = document.getElementById('imageName');
+        imageName.textContent = hasImage && this.imageFile ? this.imageFile.name : '等待导入图片';
+        imageName.title = imageName.textContent;
+        document.getElementById('imageMeta').textContent = hasImage && this.imageFile
+            ? `${this.imageManager.originalWidth} × ${this.imageManager.originalHeight} px · ${(this.imageFile.size / 1024 / 1024).toFixed(2)} MB`
+            : '你的下一张作品，从这里开始';
+        document.getElementById('canvasHint').textContent = this.isLoading ? '正在读取图片，请稍候…'
+            : !hasImage ? '上传图片后，在画布中拖拽创建选区'
+            : this.eventHandler.mode === 'pan' ? '拖拽移动图片 · 空格切换框选模式' : '拖拽创建选区 · 滚轮缩放 · Delete 删除';
+        ['zoomPreset', 'fitZoomBtn', 'resetZoomBtn', 'selectModeBtn', 'panModeBtn'].forEach(id => {
+            document.getElementById(id).disabled = this.isLoading || !hasImage;
+        });
+        this.updateZoomLevel();
 
         // 更新选择框列表
         this.updateSelectionList();
@@ -1277,9 +1330,9 @@ class ImageCropApp {
         if (selections.length === 0) {
             selectionList.innerHTML = `
                 <div class="no-selections">
-                    <div class="empty-icon">📋</div>
-                    <div class="empty-text">暂无选择框</div>
-                    <div class="empty-hint">在图片上拖拽创建</div>
+                    <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-select"/></svg></div>
+                    <div class="empty-text">还没有裁剪选区</div>
+                    <div class="empty-hint">在图片上按住鼠标拖拽<br>你想保留的区域，会出现在这里</div>
                 </div>
             `;
             return;
@@ -1292,15 +1345,15 @@ class ImageCropApp {
             const aspectRatio = (selection.width / selection.height).toFixed(2);
 
             html += `
-                <div class="selection-item ${activeClass}" data-id="${selection.id}">
+                <div class="selection-item ${activeClass}" data-id="${selection.id}" tabindex="0" aria-label="选区 ${index + 1}${selection.active ? '，当前选中' : ''}">
                     <div class="selection-item-header">
-                        <span class="selection-name">选择框 ${index + 1}</span>
+                        <span class="selection-name">选区 ${String(index + 1).padStart(2, '0')}</span>
                         <div class="selection-actions">
-                            <button class="btn-icon" onclick="app.focusSelection('${selection.id}')" title="定位到选择框">
-                                📍
+                            <button class="btn-icon" onclick="app.focusSelection('${selection.id}')" title="定位到选区" aria-label="定位到选区 ${index + 1}">
+                                <svg class="icon" aria-hidden="true"><use href="#icon-target"/></svg>
                             </button>
-                            <button class="btn-icon" onclick="app.deleteSelectionById('${selection.id}')" title="删除选择框">
-                                🗑️
+                            <button class="btn-icon delete-action" onclick="app.deleteSelectionById('${selection.id}')" title="删除选区" aria-label="删除选区 ${index + 1}">
+                                <svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>
                             </button>
                         </div>
                     </div>
@@ -1332,13 +1385,21 @@ class ImageCropApp {
         selectionList.querySelectorAll('.selection-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 // 避免按钮点击触发选择框选中
-                if (e.target.classList.contains('btn-icon')) return;
+                // SVG 内部节点也属于按钮，避免删除后又触发已删除选区的选中事件。
+                if (e.target.closest('.btn-icon')) return;
 
                 const id = item.dataset.id;
                 this.selectionManager.setActiveSelection(id);
                 this.render();
                 this.updateUI();
                 this.showStatus('已选中选择框', 'info');
+            });
+            // 列表可通过键盘选择；重绘后恢复对应条目的焦点。
+            item.addEventListener('keydown', (e) => {
+                if (e.target !== item || !['Enter', ' '].includes(e.key)) return;
+                e.preventDefault();
+                item.click();
+                selectionList.querySelector(`[data-id="${item.dataset.id}"]`)?.focus();
             });
 
             // 添加双击事件定位到选择框
@@ -1386,22 +1447,24 @@ class ImageCropApp {
     }
 
     updateZoomLevel() {
-        if (!this.imageManager.hasImage()) return;
-
-        const zoomLevel = document.getElementById('zoomLevel');
         const zoomPreset = document.getElementById('zoomPreset');
         const zoomInBtn = document.getElementById('zoomInBtn');
         const zoomOutBtn = document.getElementById('zoomOutBtn');
 
-        const percentage = this.imageManager.getZoomPercentage();
-        zoomLevel.textContent = percentage + '%';
+        const hasImage = this.imageManager.hasImage();
+        const percentage = hasImage ? this.imageManager.getZoomPercentage() : 100;
 
-        // 更新下拉选择框
+        // 适合窗口可能生成非预设比例，临时选项保证下拉框始终显示实际值。
+        const customOption = document.getElementById('customZoomOption');
+        const isPreset = Array.from(zoomPreset.options).some(option => option !== customOption && option.value === String(percentage));
+        customOption.hidden = isPreset;
+        customOption.value = String(percentage);
+        customOption.textContent = percentage + '%';
         zoomPreset.value = percentage;
 
         // 更新按钮状态
-        zoomInBtn.disabled = !this.imageManager.canZoomIn();
-        zoomOutBtn.disabled = !this.imageManager.canZoomOut();
+        zoomInBtn.disabled = this.isLoading || !hasImage || !this.imageManager.canZoomIn();
+        zoomOutBtn.disabled = this.isLoading || !hasImage || !this.imageManager.canZoomOut();
     }
 
     exportSelections() {
@@ -1468,7 +1531,9 @@ class ImageCropApp {
         statusMessage.textContent = message;
         statusMessage.className = `status-message ${type} show`;
 
-        setTimeout(() => {
+        // 连续提示时取消旧定时器，保证最新提示显示完整的三秒。
+        clearTimeout(this.statusTimer);
+        this.statusTimer = setTimeout(() => {
             statusMessage.classList.remove('show');
         }, 3000);
     }
@@ -1480,18 +1545,21 @@ class ImageCropApp {
         // 更新按钮状态
         panModeBtn.classList.remove('active');
         selectModeBtn.classList.remove('active');
+        panModeBtn.setAttribute('aria-pressed', String(mode === 'pan'));
+        selectModeBtn.setAttribute('aria-pressed', String(mode !== 'pan'));
 
         if (mode === 'pan') {
             panModeBtn.classList.add('active');
             this.canvas.style.cursor = 'grab';
             this.eventHandler.setMode('pan');
-            this.showStatus('已切换到拖动模式 ✋', 'info');
+            this.showStatus('已切换到拖动模式', 'info');
         } else {
             selectModeBtn.classList.add('active');
             this.canvas.style.cursor = 'crosshair';
             this.eventHandler.setMode('select');
-            this.showStatus('已切换到选择模式 ⊞', 'info');
+            this.showStatus('已切换到框选模式', 'info');
         }
+        this.updateUI();
     }
 
     setupDragAndDrop() {
@@ -1735,6 +1803,11 @@ class ImageManager {
                 this.displayWidth,
                 this.displayHeight
             );
+
+            // 图片边缘使用纯黑低透明度描边，不改变图片尺寸或导出像素。
+            this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(this.offsetX, this.offsetY, this.displayWidth, this.displayHeight);
 
             // 恢复上下文状态
             this.ctx.restore();
@@ -2094,14 +2167,15 @@ class CanvasRenderer {
 
         // 绘制选择框阴影（仅活动选择框）
         if (isActive) {
-            ctx.shadowColor = 'rgba(52, 152, 219, 0.5)';
-            ctx.shadowBlur = 8;
+            ctx.shadowColor = 'rgba(37, 100, 235, 0.2)';
+            ctx.shadowBlur = 4;
             ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 0;
         }
 
         // 绘制选择框边框
-        ctx.strokeStyle = isActive ? '#3498db' : '#e74c3c';
+        // 活动选区与工具栏共用蓝色，其他选区用灰蓝色，避免误读为错误状态。
+        ctx.strokeStyle = isActive ? '#2564eb' : '#718099';
         ctx.lineWidth = isActive ? 3 : 2;
         ctx.setLineDash([]);
         ctx.strokeRect(canvasCoords.x, canvasCoords.y, canvasWidth, canvasHeight);
@@ -2111,7 +2185,7 @@ class CanvasRenderer {
         ctx.shadowBlur = 0;
 
         // 绘制半透明填充
-        ctx.fillStyle = isActive ? 'rgba(52, 152, 219, 0.15)' : 'rgba(231, 76, 60, 0.08)';
+        ctx.fillStyle = isActive ? 'rgba(37, 100, 235, 0.10)' : 'rgba(113, 128, 153, 0.05)';
         ctx.fillRect(canvasCoords.x, canvasCoords.y, canvasWidth, canvasHeight);
 
         // 绘制选择框标签
@@ -2121,20 +2195,20 @@ class CanvasRenderer {
             // 绘制标签背景
             const labelPadding = 4;
             const labelHeight = 18;
-            ctx.fillStyle = isActive ? '#3498db' : '#e74c3c';
+            ctx.fillStyle = isActive ? '#2564eb' : '#718099';
             ctx.fillRect(canvasCoords.x, canvasCoords.y - labelHeight, 80, labelHeight);
 
             // 绘制标签文字
             ctx.fillStyle = 'white';
             ctx.font = 'bold 11px Arial';
             ctx.textAlign = 'left';
-            ctx.fillText(`选择框 ${selectionIndex}`, canvasCoords.x + labelPadding, canvasCoords.y - 6);
+            ctx.fillText(`选区 ${selectionIndex}`, canvasCoords.x + labelPadding, canvasCoords.y - 6);
         }
 
         // 绘制选择框尺寸信息（仅活动选择框且足够大时）
         if (isActive && canvasWidth > 100 && canvasHeight > 50) {
             const sizeText = `${Math.round(selection.width)} × ${Math.round(selection.height)}`;
-            ctx.fillStyle = 'rgba(52, 152, 219, 0.8)';
+            ctx.fillStyle = 'rgba(37, 100, 235, 0.9)';
             ctx.font = '12px Arial';
             ctx.textAlign = 'center';
 
@@ -2177,7 +2251,7 @@ class CanvasRenderer {
         const handleSize = 8;
         const halfHandle = handleSize / 2;
 
-        ctx.fillStyle = '#3498db';
+        ctx.fillStyle = '#2564eb';
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1;
 
@@ -2439,11 +2513,11 @@ class EventHandler {
 
         // 绘制临时选择框
         const ctx = this.canvasRenderer.ctx;
-        ctx.strokeStyle = '#3498db';
+        ctx.strokeStyle = '#2564eb';
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
         ctx.strokeRect(x, y, width, height);
-        ctx.fillStyle = 'rgba(52, 152, 219, 0.1)';
+        ctx.fillStyle = 'rgba(37, 100, 235, 0.1)';
         ctx.fillRect(x, y, width, height);
         ctx.setLineDash([]);
     }
@@ -2526,6 +2600,10 @@ class EventHandler {
     }
 
     handleKeyDown(event) {
+        // 表单、按钮和原生模态框保留浏览器键盘行为，避免输入空格、退格或 Tab 时操作画布。
+        const target = event.target;
+        if (document.querySelector('dialog[open]') ||
+            target?.closest?.('input, select, textarea, button, a, [contenteditable], .selection-item')) return;
         // 只在有图片时处理缩放快捷键
         if (!this.imageManager.hasImage()) return;
 
@@ -2573,7 +2651,8 @@ class EventHandler {
         }
 
         // Tab键切换选择框
-        if (event.key === 'Tab') {
+        // Escape 清除活动选区后，Tab 恢复普通焦点导航，避免把键盘用户困在画布。
+        if (event.key === 'Tab' && target === this.canvas && this.selectionManager.getActiveSelection()) {
             event.preventDefault();
             this.switchToNextSelection(event.shiftKey);
             app.render();
@@ -3019,15 +3098,9 @@ class ExportManager {
 // 快捷键折叠功能
 function toggleShortcuts() {
     const shortcutsSection = document.querySelector('.shortcuts-section');
-    const toggleIcon = document.querySelector('.toggle-icon');
-
     shortcutsSection.classList.toggle('collapsed');
-
-    if (shortcutsSection.classList.contains('collapsed')) {
-        toggleIcon.textContent = '▶';
-    } else {
-        toggleIcon.textContent = '▼';
-    }
+    // 箭头方向交由 CSS 控制，同步屏幕阅读器的展开状态。
+    document.getElementById('shortcutsToggle').setAttribute('aria-expanded', String(!shortcutsSection.classList.contains('collapsed')));
 }
 
 // 应用初始化
@@ -3036,8 +3109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     app = new ImageCropApp();
     app.init();
 });
-// 简单的单元
-测试框架
+// 简单的单元测试框架
 class SimpleTest {
     constructor() {
         this.tests = [];
