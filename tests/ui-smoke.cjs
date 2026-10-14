@@ -40,7 +40,7 @@ async function main() {
             assert.equal(await page.locator('.sidebar').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', '左栏应恢复浅色');
         }
         await checkDesktopLayout(1440, 900);
-        assert.ok((await page.locator('#selectionList').boundingBox()).height >= 300, '桌面选区列表应留出至少 300px 高度');
+        assert.ok((await page.locator('#selectionList').boundingBox()).height >= 250, '桌面选区列表应留出至少 250px 高度');
         await screenshot('workbench-empty.png');
 
         // 检查两个上传入口确实打开同一文件选择器。
@@ -114,11 +114,44 @@ async function main() {
         assert.equal(await page.locator('#mainCanvas').evaluate(el => el === document.activeElement), false, '取消选区后应能用 Tab 离开画布');
         await page.locator('.selection-item').first().focus();
         await page.keyboard.press('Enter');
+        assert.equal(await page.locator('.selection-thumbnail').count(), 2, '每个选区应有裁剪缩略图');
+        assert.equal(await page.locator('.selection-editor').count(), 1, '仅活动选区应展开尺寸编辑');
+        // 编辑尺寸可撤销重做，最终恢复原始裁剪区域，继续验证导出像素。
+        const initialWidth = await page.evaluate(() => app.selectionManager.getActiveSelection().width);
+        await page.locator('input[data-field="width"]').fill('280');
+        await page.locator('input[data-field="width"]').press('Tab');
+        assert.equal(await page.evaluate(() => app.selectionManager.getActiveSelection().width), 280, '输入宽度应更新选区');
+        await page.locator('#undoBtn').click();
+        assert.equal(await page.evaluate(() => app.selectionManager.getActiveSelection().width), initialWidth, '撤销应恢复宽度');
+        await page.locator('#redoBtn').click();
+        assert.equal(await page.evaluate(() => app.selectionManager.getActiveSelection().width), 280, '重做应重新应用宽度');
+        await page.locator('#undoBtn').click();
+        await page.locator('input[data-field="lockedRatio"]').check();
+        await page.locator('input[data-field="width"]').fill('280');
+        await page.locator('input[data-field="width"]').press('Tab');
+        const ratio = await page.evaluate(() => { const s = app.selectionManager.getActiveSelection(); return s.width / s.height - s.lockedRatio; });
+        assert.ok(Math.abs(ratio) < 1e-9, '尺寸编辑应保持锁定比例');
+        await page.locator('#undoBtn').click();
+        await page.locator('#undoBtn').click();
+        await page.locator('#newSelectionBtn').click();
+        await dragSelection(100, 100, 220, 220);
+        assert.equal(await count(), 3, '新建选区应允许在已有框内部创建');
+        await page.locator('#undoBtn').click();
+        assert.equal(await count(), 2, '新建选区应可以撤销');
+        await page.locator('#toggleSelectionsBtn').click();
+        assert.equal(await page.evaluate(() => app.showSelections), false, '眼睛按钮应隐藏选区显示');
+        await page.locator('#toggleSelectionsBtn').click();
+        await page.locator('#mainCanvas').focus();
+        await page.keyboard.down('Space');
+        assert.equal(await page.evaluate(() => app.eventHandler.mode), 'pan', '按住空格应临时拖动画布');
+        await page.keyboard.up('Space');
+        assert.equal(await page.evaluate(() => app.eventHandler.mode), 'select', '松开空格应恢复框选');
         await screenshot('workbench-editing.png');
 
         // 导出表单输入空格、退格、Tab 不应触发画布快捷键。
         await page.locator('#exportBtn').click();
         assert.equal(await page.locator('dialog').evaluate(el => el.matches(':modal')), true, '导出应使用原生模态框');
+        assert.equal(await page.locator('#zipOptionGroup').isVisible(), true, '少量选区也应允许 ZIP 下载');
         await page.locator('#filenamePrefix').fill('测试 前缀');
         await page.locator('#filenamePrefix').press('Backspace');
         await page.locator('#filenamePrefix').press('Space');
@@ -126,6 +159,7 @@ async function main() {
         assert.equal(await count(), 2, '表单输入不应删除选区');
         assert.equal(await page.evaluate(() => app.eventHandler.mode), 'select', '表单空格不应切换画布模式');
         await page.locator('#fileFormat').selectOption('jpeg');
+        assert.match(await page.locator('#filenamePreview').innerText(), /\.jpg$/, '文件名预览应同步格式');
         assert.equal(await page.locator('#qualityGroup').isVisible(), true, 'JPEG 应显示质量选项');
         await page.locator('#fileFormat').selectOption('png');
         assert.equal(await page.locator('#qualityGroup').isVisible(), false, 'PNG 应隐藏质量选项');

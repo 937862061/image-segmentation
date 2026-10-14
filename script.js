@@ -152,6 +152,9 @@ class ImageCropApp {
         this.imageFile = null;
         this.isLoading = false;
         this.statusTimer = null;
+        this.showSelections = true;
+        this.isExporting = false;
+        this.lastSelectionClick = null;
     }
 
     init() {
@@ -211,6 +214,7 @@ class ImageCropApp {
 
     // 显示导出对话框
     showExportDialog() {
+        if (this.isExporting) return;
         if (this.selectionManager.getAllSelections().length === 0) {
             this.showStatus('请先创建选择框', 'error');
             return;
@@ -232,116 +236,24 @@ class ImageCropApp {
         const overlay = document.createElement('dialog');
         overlay.className = 'export-dialog-overlay';
         overlay.setAttribute('aria-labelledby', 'exportDialogTitle');
+        const count = this.selectionManager.getAllSelections().length;
         overlay.innerHTML = `
             <div class="export-dialog">
-                <div class="export-dialog-header">
-                    <h3 id="exportDialogTitle">导出设置</h3>
-                    <button class="close-btn" aria-label="关闭导出设置" onclick="this.closest('dialog').close()">×</button>
-                </div>
+                <div class="export-dialog-header"><h3 id="exportDialogTitle">导出 ${count} 个选区</h3><button class="close-btn" aria-label="关闭导出设置" onclick="this.closest('dialog').close()">×</button></div>
                 <div class="export-dialog-content">
-                    <div class="environment-status ${this.environmentChecker.capabilities.supportLevel}">
-                        <div class="status-icon">${this.environmentChecker.getStatusIcon()}</div>
-                        <div class="status-text">${this.environmentChecker.getRecommendation()}</div>
-                        ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ?
-                '<div class="fallback-notice">将使用浏览器默认下载方式</div>' : ''}
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>导出方式:</label>
-                        <div class="export-method-options">
-                            <label class="radio-option">
-                                <input type="radio" name="exportMethod" value="download" checked>
-                                <span>直接下载到默认文件夹</span>
-                            </label>
-                            <label class="radio-option" ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ? 'style="opacity: 0.5; pointer-events: none;"' : ''}>
-                                <input type="radio" name="exportMethod" value="folder" ${this.environmentChecker.capabilities.supportLevel !== 'full_support' ? 'disabled' : ''}>
-                                <span>选择文件夹保存</span>
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group" id="folderSelectGroup" style="display: none;">
-                        <label>保存位置:</label>
-                        <button id="selectFolderBtn" class="btn btn-secondary">选择文件夹</button>
-                        <div id="selectedFolder" class="selected-folder"></div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="filenamePrefix">文件名前缀:</label>
-                        <input type="text" id="filenamePrefix" value="" placeholder="输入文件名前缀">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="fileFormat">文件格式:</label>
-                        <select id="fileFormat">
-                            <option value="png">PNG (推荐)</option>
-                            <option value="jpeg">JPEG</option>
-                            <option value="webp">WebP</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" id="zipOptionGroup" style="display: ${this.selectionManager.getAllSelections().length > 10 ? 'block' : 'none'};">
-                        <label class="checkbox-option">
-                            <input type="checkbox" id="useZipCompression" ${this.selectionManager.getAllSelections().length > 10 ? 'checked' : ''}>
-                            <span>打包为ZIP文件下载 (当前 ${this.selectionManager.getAllSelections().length} 个文件)</span>
-                        </label>
-                        <div class="hint-text">建议：当导出10个以上图片时使用ZIP压缩，更方便快捷</div>
-                    </div>
-
-                    <div class="form-group" id="qualityGroup" style="display: none;">
-                        <label for="imageQuality">图片质量:</label>
-                        <input type="range" id="imageQuality" min="0.1" max="1" step="0.1" value="0.9">
-                        <span id="qualityValue">90%</span>
-                    </div>
-
-                    <div class="export-info">
-                        <div>将导出 <strong id="exportCount">${this.selectionManager.getAllSelections().length}</strong> 个选择框</div>
-                        <div>图片数量: <strong>${this.imageManager.hasImage() ? 1 : 0}</strong></div>
-                    </div>
-                    
-                    <div class="debug-info-toggle">
-                        <button type="button" class="btn btn-link" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
-                            查看环境信息
-                        </button>
-                        <div class="debug-info" style="display: none;">
-                            <h4>环境信息</h4>
-                            <div class="debug-item">
-                                <span class="debug-label">支持级别:</span>
-                                <span class="debug-value">${this.environmentChecker.capabilities.supportLevel}</span>
-                            </div>
-                            <div class="debug-item">
-                                <span class="debug-label">安全上下文:</span>
-                                <span class="debug-value">${this.environmentChecker.capabilities.isSecureContext ? '是' : '否'}</span>
-                            </div>
-                            <div class="debug-item">
-                                <span class="debug-label">协议:</span>
-                                <span class="debug-value">${this.environmentChecker.capabilities.protocol}</span>
-                            </div>
-                            <div class="debug-item">
-                                <span class="debug-label">主机名:</span>
-                                <span class="debug-value">${this.environmentChecker.capabilities.hostname}</span>
-                            </div>
-                            <div class="debug-item">
-                                <span class="debug-label">文件系统API:</span>
-                                <span class="debug-value">${this.environmentChecker.capabilities.hasFileSystemAccess ? '支持' : '不支持'}</span>
-                            </div>
-                            <div class="debug-item">
-                                <span class="debug-label">用户代理:</span>
-                                <span class="debug-value" style="font-size: 11px; word-break: break-all;">${this.environmentChecker.capabilities.userAgent}</span>
-                            </div>
-                        </div>
-                    </div>
+                    <div class="form-group"><label for="fileFormat">图片格式</label><select id="fileFormat"><option value="png">PNG · 清晰无损</option><option value="jpeg">JPEG · 较小文件</option><option value="webp">WebP · 高效压缩</option></select></div>
+                    <div class="form-group" id="qualityGroup" style="display: none;"><label for="imageQuality">图片质量</label><input type="range" id="imageQuality" min="0.1" max="1" step="0.1" value="0.9"><span id="qualityValue">90%</span></div>
+                    <div class="form-group"><label for="filenamePrefix">文件名前缀</label><input type="text" id="filenamePrefix" placeholder="默认使用 crop"><span id="filenamePreview" class="filename-preview">示例：crop_1.png</span></div>
+                    <div class="form-group"><label>保存方式</label><div class="export-method-options">
+                        <label class="radio-option"><input type="radio" name="exportMethod" value="download" checked><span>下载到浏览器默认位置</span></label>
+                        <label class="radio-option"><input type="radio" name="exportMethod" value="folder"><span>保存到指定文件夹</span></label>
+                    </div>${this.environmentChecker.capabilities.supportLevel !== 'full_support' ? '<div class="hint-text">当前环境无法选择文件夹，仍可直接下载</div>' : ''}</div>
+                    <div class="form-group" id="folderSelectGroup" style="display: none;"><label>保存文件夹</label><button id="selectFolderBtn" class="btn btn-secondary">选择文件夹</button><div id="selectedFolder" class="selected-folder"></div></div>
+                    <div class="form-group" id="zipOptionGroup"><label class="checkbox-option"><input type="checkbox" id="useZipCompression" ${count > 10 ? 'checked' : ''}><span>打包为一个 ZIP 文件</span></label><div class="hint-text">一次下载，包含全部 ${count} 张裁剪图片</div></div>
                 </div>
-                <div class="export-dialog-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('dialog').close()">取消</button>
-                    <button class="btn btn-primary" id="confirmExportBtn">开始导出</button>
-                </div>
-            </div>
-        `;
-
-        // 添加事件监听器
+                <div class="export-dialog-footer"><button class="btn btn-secondary" onclick="this.closest('dialog').close()">取消</button><button class="btn btn-primary" id="confirmExportBtn">导出 ${count} 张图片</button></div>
+            </div>`;
         this.setupExportDialogEvents(overlay);
-
         return overlay;
     }
 
@@ -355,13 +267,19 @@ class ImageCropApp {
         const imageQuality = overlay.querySelector('#imageQuality');
         const qualityValue = overlay.querySelector('#qualityValue');
         const confirmExportBtn = overlay.querySelector('#confirmExportBtn');
+        const zipOptionGroup = overlay.querySelector('#zipOptionGroup');
+        const prefixInput = overlay.querySelector('#filenamePrefix');
+        const updateFilenamePreview = () => {
+            overlay.querySelector('#filenamePreview').textContent = `示例：${prefixInput.value || 'crop'}_1.${fileFormatSelect.value === 'jpeg' ? 'jpg' : fileFormatSelect.value}`;
+        };
 
         // 验证关键DOM元素存在
         if (!folderSelectGroup || !selectFolderBtn || !fileFormatSelect ||
-            !qualityGroup || !imageQuality || !qualityValue || !confirmExportBtn) {
+            !qualityGroup || !imageQuality || !qualityValue || !confirmExportBtn || !zipOptionGroup || !prefixInput) {
             console.error('导出对话框: 缺少必要的DOM元素');
             return;
         }
+        prefixInput.addEventListener('input', updateFilenamePreview);
 
         let selectedDirectoryHandle = null;
 
@@ -401,11 +319,13 @@ class ImageCropApp {
                 } else {
                     folderSelectGroup.style.display = 'none';
                 }
+                zipOptionGroup.style.display = radio.value === 'download' ? 'block' : 'none';
             });
         });
 
         // 文件格式切换
         fileFormatSelect.addEventListener('change', () => {
+            updateFilenamePreview();
             if (fileFormatSelect.value === 'jpeg' || fileFormatSelect.value === 'webp') {
                 qualityGroup.style.display = 'block';
             } else {
@@ -459,7 +379,7 @@ class ImageCropApp {
 
                 const selectedFolder = overlay.querySelector('#selectedFolder');
                 if (selectedFolder) {
-                    selectedFolder.innerHTML = `<div class="folder-info">✅ 已选择文件夹: <strong>${selectedDirectoryHandle.name}</strong></div>`;
+                    selectedFolder.textContent = `已选择：${selectedDirectoryHandle.name}`;
                     this.showStatus('文件夹选择成功', 'success');
                     console.log('选择的文件夹:', selectedDirectoryHandle.name);
                 } else {
@@ -597,6 +517,7 @@ class ImageCropApp {
     fallbackToDownload(overlay, folderSelectGroup) {
         overlay.querySelector('input[value="download"]').checked = true;
         folderSelectGroup.style.display = 'none';
+        overlay.querySelector('#zipOptionGroup').style.display = 'block';
         this.showStatus('已切换到默认下载模式', 'info');
     }
 
@@ -639,7 +560,12 @@ class ImageCropApp {
 
     // 执行导出
     async performExport(config) {
-        const selections = this.selectionManager.getAllSelections();
+        if (this.isExporting) return;
+        this.eventHandler.cancelCurrentOperation();
+        // 导出使用独立选区快照；导出期间禁止换图，避免一批文件混用不同原图。
+        const selections = this.selectionManager.snapshot();
+        this.isExporting = true;
+        this.updateUI();
         let exportCount = 0;
         let failedCount = 0;
         let fallbackUsed = false;
@@ -651,8 +577,11 @@ class ImageCropApp {
             // 如果启用ZIP压缩且是下载模式，使用ZIP导出
             if (config.useZip && config.method === 'download') {
                 console.log('[导出] 使用ZIP压缩模式');
-                await this.performZipExport(config, selections);
-                return;
+                if (typeof JSZip !== 'undefined') {
+                    await this.performZipExport(config, selections);
+                    return;
+                }
+                this.showStatus('ZIP 功能不可用，将下载独立图片', 'warning');
             }
 
             console.log(`[导出] 开始循环，总共 ${selections.length} 个文件`);
@@ -660,7 +589,7 @@ class ImageCropApp {
             for (let i = 0; i < selections.length; i++) {
                 try {
                     const selection = selections[i];
-                    const filename = `${config.prefix}_${i + 1}.${config.format}`;
+                    const filename = `${config.prefix}_${i + 1}.${config.format === 'jpeg' ? 'jpg' : config.format}`;
 
                     console.log(`[导出] ========== 第 ${i + 1}/${selections.length} 个文件 ==========`);
                     console.log(`[导出] 文件名: ${filename}`);
@@ -786,6 +715,9 @@ class ImageCropApp {
         } catch (error) {
             console.error('导出过程发生严重错误:', error);
             this.showStatus('导出失败: ' + error.message, 'error');
+        } finally {
+            this.isExporting = false;
+            this.updateUI();
         }
     }
 
@@ -794,11 +726,7 @@ class ImageCropApp {
         try {
             // 检查JSZip是否加载
             if (typeof JSZip === 'undefined') {
-                console.error('JSZip库未加载');
-                this.showStatus('ZIP压缩功能不可用，将使用普通下载', 'warning');
-                // 回退到普通导出
-                config.useZip = false;
-                return this.performExport(config);
+                throw new Error('ZIP 功能未加载，请使用独立图片下载');
             }
 
             this.showStatus('正在准备ZIP压缩...', 'info');
@@ -812,7 +740,7 @@ class ImageCropApp {
             for (let i = 0; i < selections.length; i++) {
                 try {
                     const selection = selections[i];
-                    const filename = `${config.prefix}_${i + 1}.${config.format}`;
+                    const filename = `${config.prefix}_${i + 1}.${config.format === 'jpeg' ? 'jpg' : config.format}`;
                     
                     console.log(`[ZIP导出] 处理第 ${i + 1}/${selections.length} 个文件: ${filename}`);
                     this.showStatus(`正在处理: ${i + 1}/${selections.length}`, 'info');
@@ -925,8 +853,8 @@ class ImageCropApp {
                 // 设置导出格式和质量
                 const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
                     config.format === 'webp' ? 'image/webp' : 'image/png';
-                // PNG不需要质量参数（无损），JPEG/WebP最低使用95%质量
-                const quality = config.format === 'png' ? undefined : Math.max(config.quality, 0.95);
+                // PNG 是无损编码；JPEG/WebP 按用户选择的质量编码。
+                const quality = config.format === 'png' ? undefined : config.quality;
 
                 // 转换为Blob
                 tempCanvas.toBlob((blob) => {
@@ -986,8 +914,8 @@ class ImageCropApp {
                 // 设置导出格式和质量
                 const mimeType = config.format === 'jpeg' ? 'image/jpeg' :
                     config.format === 'webp' ? 'image/webp' : 'image/png';
-                // PNG不需要质量参数（无损），JPEG/WebP最低使用95%质量
-                const quality = config.format === 'png' ? undefined : Math.max(config.quality, 0.95);
+                // PNG 是无损编码；JPEG/WebP 按用户选择的质量编码。
+                const quality = config.format === 'png' ? undefined : config.quality;
 
                 // 转换为Blob（确保最高质量）
                 tempCanvas.toBlob(async (blob) => {
@@ -1188,24 +1116,62 @@ class ImageCropApp {
         selectModeBtn.addEventListener('click', () => {
             this.setMode('select');
         });
+        document.getElementById('undoBtn').addEventListener('click', () => this.restoreHistory());
+        document.getElementById('redoBtn').addEventListener('click', () => this.restoreHistory(true));
+        document.getElementById('statusUndoBtn').addEventListener('click', () => this.restoreHistory());
+        document.getElementById('newSelectionBtn').addEventListener('click', () => {
+            this.setMode('select');
+            this.showSelections = true;
+            this.eventHandler.forceNewSelection = true;
+            this.canvas.focus({ preventScroll: true });
+            this.render();
+            this.updateUI();
+            this.showStatus('拖拽创建新选区，Esc 取消', 'info');
+        });
+        document.getElementById('toggleSelectionsBtn').addEventListener('click', () => {
+            this.eventHandler.cancelCurrentOperation();
+            this.showSelections = !this.showSelections;
+            this.render();
+            this.updateUI();
+        });
 
         // 键盘事件
         document.addEventListener('keydown', (e) => {
             this.eventHandler.handleKeyDown(e);
         });
+        // 空格的按下与松开必须成对处理；窗口失焦也恢复模式，避免卡在拖动状态。
+        document.addEventListener('keyup', (e) => {
+            if (e.key === ' ') this.eventHandler.releaseSpacePan();
+        });
+        window.addEventListener('blur', () => {
+            this.eventHandler.releaseSpacePan();
+            this.eventHandler.cancelCurrentOperation();
+            this.render();
+            this.updateUI();
+        });
 
         // Canvas事件
-        this.canvas.addEventListener('mousedown', (e) => {
+        this.canvas.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 || !e.isPrimary || this.isLoading || this.isExporting) return;
+            e.preventDefault();
+            this.canvas.setPointerCapture(e.pointerId);
             this.canvas.focus({ preventScroll: true });
             this.eventHandler.handleMouseDown(e);
         });
 
-        this.canvas.addEventListener('mousemove', (e) => {
+        this.canvas.addEventListener('pointermove', (e) => {
+            if (this.isLoading || this.isExporting || !e.isPrimary) return;
             this.eventHandler.handleMouseMove(e);
         });
 
-        this.canvas.addEventListener('mouseup', (e) => {
+        this.canvas.addEventListener('pointerup', (e) => {
+            if (e.button !== 0 || !e.isPrimary || this.isLoading || this.isExporting) return;
             this.eventHandler.handleMouseUp(e);
+        });
+        this.canvas.addEventListener('pointercancel', () => {
+            this.eventHandler.cancelCurrentOperation();
+            this.render();
+            this.updateUI();
         });
 
         this.canvas.addEventListener('contextmenu', (e) => {
@@ -1238,7 +1204,7 @@ class ImageCropApp {
     }
 
     loadImage(file) {
-        if (this.isLoading) return;
+        if (this.isLoading || this.isExporting) return;
         // 加载期间禁用工具，避免未完成读取时继续操作旧画布。
         this.isLoading = true;
         // 重置应用状态
@@ -1266,11 +1232,13 @@ class ImageCropApp {
 
     // 重置应用状态
     resetApplication() {
+        // 先撤回未完成手势，再清空选区，避免取消手势时把旧选区重新恢复出来。
+        this.eventHandler.cancelCurrentOperation();
+        this.eventHandler.spacePanState = null;
+        this.showSelections = true;
+        this.lastSelectionClick = null;
         // 使用新的reset方法替代直接操作，确保选择框编号从1开始
         this.selectionManager.reset();
-
-        // 重置事件处理器状态
-        this.eventHandler.cancelCurrentOperation();
 
         // 重置为选择模式
         this.setMode('select');
@@ -1284,7 +1252,9 @@ class ImageCropApp {
     render() {
         this.canvasRenderer.clear();
         this.canvasRenderer.drawImage(this.imageManager);
-        this.canvasRenderer.drawSelections(this.selectionManager.getAllSelections(), this.imageManager);
+        if (this.showSelections) {
+            this.canvasRenderer.drawSelections(this.selectionManager.getAllSelections(), this.imageManager);
+        }
         this.updateZoomLevel();
     }
 
@@ -1293,11 +1263,11 @@ class ImageCropApp {
         const exportBtn = document.getElementById('exportBtn');
         const hasSelections = this.selectionManager.getAllSelections().length > 0;
         const hasImage = this.imageManager.hasImage();
-        exportBtn.disabled = this.isLoading || !hasSelections || !hasImage;
+        exportBtn.disabled = this.isLoading || this.isExporting || !hasSelections || !hasImage;
 
         // 页面展示使用 textContent，文件名含特殊字符时也不会变成 HTML。
-        document.getElementById('uploadBtn').disabled = this.isLoading;
-        document.getElementById('welcomeUploadBtn').disabled = this.isLoading;
+        document.getElementById('uploadBtn').disabled = this.isLoading || this.isExporting;
+        document.getElementById('welcomeUploadBtn').disabled = this.isLoading || this.isExporting;
         document.getElementById('imageState').textContent = this.isLoading ? '加载中' : hasImage ? '已导入' : '未上传';
         const imageName = document.getElementById('imageName');
         imageName.textContent = hasImage && this.imageFile ? this.imageFile.name : '等待导入图片';
@@ -1306,12 +1276,23 @@ class ImageCropApp {
             ? `${this.imageManager.originalWidth} × ${this.imageManager.originalHeight} px · ${(this.imageFile.size / 1024 / 1024).toFixed(2)} MB`
             : '你的下一张作品，从这里开始';
         document.getElementById('canvasHint').textContent = this.isLoading ? '正在读取图片，请稍候…'
-            : !hasImage ? '上传图片后，在画布中拖拽创建选区'
-            : this.eventHandler.mode === 'pan' ? '拖拽移动图片 · 空格切换框选模式' : '拖拽创建选区 · 滚轮缩放 · Delete 删除';
+            : !hasImage ? '打开图片后，在画布中拖拽创建选区'
+            : this.eventHandler.forceNewSelection ? '在任意区域拖拽，包括已有选区内部'
+            : !this.showSelections ? '选区已隐藏 · 再点眼睛图标恢复编辑'
+            : this.eventHandler.mode === 'pan' ? '拖拽移动图片 · 点击框选恢复编辑' : '拖拽框选 · 按住空格拖动 · 方向键微调';
         ['zoomPreset', 'fitZoomBtn', 'resetZoomBtn', 'selectModeBtn', 'panModeBtn'].forEach(id => {
             document.getElementById(id).disabled = this.isLoading || !hasImage;
         });
         this.updateZoomLevel();
+        document.getElementById('undoBtn').disabled = this.isLoading || this.isExporting || !this.selectionManager.history.length;
+        document.getElementById('redoBtn').disabled = this.isLoading || this.isExporting || !this.selectionManager.future.length;
+        document.getElementById('newSelectionBtn').disabled = this.isLoading || this.isExporting || !hasImage;
+        document.getElementById('newSelectionBtn').setAttribute('aria-pressed', String(this.eventHandler.forceNewSelection));
+        const visibilityButton = document.getElementById('toggleSelectionsBtn');
+        visibilityButton.disabled = this.isLoading || !hasSelections;
+        visibilityButton.setAttribute('aria-pressed', String(!this.showSelections));
+        visibilityButton.setAttribute('aria-label', this.showSelections ? '隐藏选区' : '显示选区');
+        visibilityButton.title = this.showSelections ? '隐藏选区，查看原图' : '显示选区，恢复编辑';
 
         // 更新选择框列表
         this.updateSelectionList();
@@ -1320,94 +1301,95 @@ class ImageCropApp {
     updateSelectionList() {
         const selectionList = document.getElementById('selectionList');
         const selections = this.selectionManager.getAllSelections();
-
-        // 更新选择框数量
-        const selectionCount = document.getElementById('selectionCount');
-        if (selectionCount) {
-            selectionCount.textContent = selections.length;
-        }
-
-        if (selections.length === 0) {
-            selectionList.innerHTML = `
-                <div class="no-selections">
-                    <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-select"/></svg></div>
-                    <div class="empty-text">还没有裁剪选区</div>
-                    <div class="empty-hint">在图片上按住鼠标拖拽<br>你想保留的区域，会出现在这里</div>
-                </div>
-            `;
+        document.getElementById('selectionCount').textContent = selections.length;
+        // 重绘时保留滚动位置和输入焦点，编辑尺寸后可继续 Tab 到下一个字段。
+        const scrollTop = selectionList.scrollTop;
+        const focused = selectionList.contains(document.activeElement) ? document.activeElement : null;
+        const focusedId = focused?.closest('.selection-item')?.dataset.id;
+        const focusedField = focused?.dataset.field;
+        if (!selections.length) {
+            selectionList.innerHTML = '<div class="no-selections"><div class="empty-icon"><svg class="icon"><use href="#icon-select"/></svg></div><div class="empty-text">还没有裁剪选区</div><div class="empty-hint">拖拽框选，或点击「新建选区」<br>每个选区会导出为一张图片</div></div>';
             return;
         }
-
-        let html = '';
-        selections.forEach((selection, index) => {
-            const activeClass = selection.active ? 'active' : '';
-            const area = Math.round(selection.width * selection.height);
-            const aspectRatio = (selection.width / selection.height).toFixed(2);
-
-            html += `
-                <div class="selection-item ${activeClass}" data-id="${selection.id}" tabindex="0" aria-label="选区 ${index + 1}${selection.active ? '，当前选中' : ''}">
-                    <div class="selection-item-header">
-                        <span class="selection-name">选区 ${String(index + 1).padStart(2, '0')}</span>
-                        <div class="selection-actions">
-                            <button class="btn-icon" onclick="app.focusSelection('${selection.id}')" title="定位到选区" aria-label="定位到选区 ${index + 1}">
-                                <svg class="icon" aria-hidden="true"><use href="#icon-target"/></svg>
-                            </button>
-                            <button class="btn-icon delete-action" onclick="app.deleteSelectionById('${selection.id}')" title="删除选区" aria-label="删除选区 ${index + 1}">
-                                <svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="selection-item-info">
-                        <div class="info-row">
-                            <span class="info-label">位置:</span>
-                            <span class="info-value">(${Math.round(selection.x)}, ${Math.round(selection.y)})</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">大小:</span>
-                            <span class="info-value">${Math.round(selection.width)} × ${Math.round(selection.height)}</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">面积:</span>
-                            <span class="info-value">${area.toLocaleString()} px²</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">比例:</span>
-                            <span class="info-value">${aspectRatio}:1</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-
-        selectionList.innerHTML = html;
-
-        // 添加点击事件
-        selectionList.querySelectorAll('.selection-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                // 避免按钮点击触发选择框选中
-                // SVG 内部节点也属于按钮，避免删除后又触发已删除选区的选中事件。
-                if (e.target.closest('.btn-icon')) return;
-
-                const id = item.dataset.id;
-                this.selectionManager.setActiveSelection(id);
+        selectionList.innerHTML = selections.map((selection, index) => {
+            const fields = [['x', 'X 坐标'], ['y', 'Y 坐标'], ['width', '宽度'], ['height', '高度']];
+            const editor = selection.active ? `<div class="selection-editor">
+                <div class="geometry-fields">${fields.map(([field, label]) => `<label>${label}<span class="pixel-input"><input type="number" data-field="${field}" aria-label="选区 ${index + 1} ${label}" value="${Number(selection[field].toFixed(2))}" min="${['width', 'height'].includes(field) ? 10 : 0}" step="any"><span>px</span></span></label>`).join('')}</div>
+                <label class="ratio-lock"><input type="checkbox" data-field="lockedRatio" ${selection.lockedRatio ? 'checked' : ''}>锁定比例 <span>${(selection.width / selection.height).toFixed(2)} : 1</span></label>
+                <p class="editor-hint">方向键移动 1px · Shift 移动 10px</p>
+            </div>` : '';
+            return `<div class="selection-item ${selection.active ? 'active' : ''}" data-id="${selection.id}" tabindex="0" aria-label="选区 ${index + 1}${selection.active ? '，当前选中' : ''}">
+                <div class="selection-item-header">
+                    <canvas class="selection-thumbnail" width="96" height="80" aria-hidden="true"></canvas>
+                    <div class="selection-summary"><span class="selection-name">选区 ${String(index + 1).padStart(2, '0')}</span><span class="selection-size">${Math.round(selection.width)} × ${Math.round(selection.height)} px</span></div>
+                    <div class="selection-actions"><button class="btn-icon locate-action" title="定位到选区" aria-label="定位到选区 ${index + 1}"><svg class="icon"><use href="#icon-target"/></svg></button><button class="btn-icon delete-action" title="删除选区" aria-label="删除选区 ${index + 1}"><svg class="icon"><use href="#icon-trash"/></svg></button></div>
+                </div>${editor}
+            </div>`;
+        }).join('');
+        selectionList.querySelectorAll('.selection-item').forEach((item, index) => {
+            const selection = selections[index];
+            const preview = item.querySelector('.selection-thumbnail');
+            const ctx = preview.getContext('2d');
+            // 缩略图按原图比例居中绘制，不拉伸，也不修改实际裁剪尺寸。
+            if (this.imageManager.image) {
+                const scale = Math.min(preview.width / selection.width, preview.height / selection.height);
+                const width = selection.width * scale;
+                const height = selection.height * scale;
+                ctx.drawImage(this.imageManager.image, selection.x, selection.y, selection.width, selection.height,
+                    (preview.width - width) / 2, (preview.height - height) / 2, width, height);
+            }
+            item.querySelector('.locate-action').addEventListener('click', () => this.focusSelection(selection.id));
+            item.querySelector('.delete-action').addEventListener('click', () => this.deleteSelectionById(selection.id));
+            item.querySelectorAll('input, button').forEach(control => { control.disabled = this.isLoading || this.isExporting; });
+            item.addEventListener('click', event => {
+                if (event.target.closest('button, input, label') || this.isLoading || this.isExporting) return;
+                // 选中会重绘列表，使用时间与选区 ID 识别双击，避免新 DOM 节点打断双击。
+                const doubleClick = event.detail > 0 && this.lastSelectionClick?.id === selection.id && event.timeStamp - this.lastSelectionClick.time < 400;
+                this.lastSelectionClick = event.detail > 0 ? { id: selection.id, time: event.timeStamp } : null;
+                if (doubleClick) {
+                    this.lastSelectionClick = null;
+                    this.focusSelection(selection.id);
+                    return;
+                }
+                this.selectionManager.setActiveSelection(selection.id);
+                this.showSelections = true;
                 this.render();
                 this.updateUI();
-                this.showStatus('已选中选择框', 'info');
+                selectionList.querySelector(`[data-id="${selection.id}"]`)?.focus({ preventScroll: true });
             });
-            // 列表可通过键盘选择；重绘后恢复对应条目的焦点。
-            item.addEventListener('keydown', (e) => {
-                if (e.target !== item || !['Enter', ' '].includes(e.key)) return;
-                e.preventDefault();
-                item.click();
-                selectionList.querySelector(`[data-id="${item.dataset.id}"]`)?.focus();
+            item.addEventListener('keydown', event => {
+                if (event.target !== item) return;
+                if (['Enter', ' '].includes(event.key)) {
+                    event.preventDefault();
+                    item.click();
+                } else if (['Delete', 'Backspace'].includes(event.key)) {
+                    event.preventDefault();
+                    this.deleteSelectionById(selection.id);
+                    selectionList.querySelector('.selection-item')?.focus();
+                } else if (event.key.startsWith('Arrow')) {
+                    this.selectionManager.setActiveSelection(selection.id);
+                    this.eventHandler.nudgeSelection(event);
+                }
             });
-
-            // 添加双击事件定位到选择框
-            item.addEventListener('dblclick', (e) => {
-                const id = item.dataset.id;
-                this.focusSelection(id);
+            item.querySelectorAll('input[data-field]').forEach(input => {
+                input.addEventListener('change', () => {
+                    if (input.dataset.field === 'lockedRatio') {
+                        const before = this.selectionManager.snapshot();
+                        this.selectionManager.updateSelection(selection.id, { lockedRatio: input.checked ? selection.width / selection.height : null });
+                        this.selectionManager.recordChange(before);
+                        requestAnimationFrame(() => this.updateUI());
+                    } else {
+                        this.editSelection(selection.id, input.dataset.field, input.value);
+                    }
+                });
             });
         });
+        selectionList.scrollTop = scrollTop;
+        if (focusedId) {
+            const item = selectionList.querySelector(`[data-id="${focusedId}"]`);
+            const nextFocus = focusedField ? item?.querySelector(`[data-field="${focusedField}"]`) : item;
+            nextFocus?.focus({ preventScroll: true });
+        }
     }
 
     // 定位到指定选择框
@@ -1416,6 +1398,7 @@ class ImageCropApp {
         if (!selection) return;
 
         this.selectionManager.setActiveSelection(selectionId);
+        this.showSelections = true;
 
         // 计算选择框在Canvas上的中心点
         const centerX = selection.x + selection.width / 2;
@@ -1440,10 +1423,13 @@ class ImageCropApp {
 
     // 通过ID删除选择框
     deleteSelectionById(selectionId) {
+        if (this.isLoading || this.isExporting) return;
+        this.eventHandler.cancelCurrentOperation();
+        this.lastSelectionClick = null;
         this.selectionManager.deleteSelection(selectionId);
         this.render();
         this.updateUI();
-        this.showStatus('选择框已删除', 'info');
+        this.showStatus('选区已删除', 'info', true);
     }
 
     updateZoomLevel() {
@@ -1514,10 +1500,7 @@ class ImageCropApp {
     deleteActiveSelection() {
         const activeSelection = this.selectionManager.getActiveSelection();
         if (activeSelection) {
-            this.selectionManager.deleteSelection(activeSelection.id);
-            this.render();
-            this.updateUI();
-            this.showStatus('选择框已删除', 'info');
+            this.deleteSelectionById(activeSelection.id);
         }
     }
 
@@ -1526,10 +1509,16 @@ class ImageCropApp {
         welcomeMessage.style.display = 'none';
     }
 
-    showStatus(message, type = 'info') {
+    showStatus(message, type = 'info', canUndo = false) {
         const statusMessage = document.getElementById('statusMessage');
-        statusMessage.textContent = message;
+        document.getElementById('statusText').textContent = message;
+        document.getElementById('statusUndoBtn').hidden = !canUndo;
         statusMessage.className = `status-message ${type} show`;
+        // 左栏保留最新结果，长时间导出结束后仍可查看；浮动提示只承担即时反馈。
+        const operationStatus = document.getElementById('operationStatus');
+        operationStatus.textContent = message;
+        operationStatus.title = message;
+        operationStatus.dataset.type = type;
 
         // 连续提示时取消旧定时器，保证最新提示显示完整的三秒。
         clearTimeout(this.statusTimer);
@@ -1560,6 +1549,41 @@ class ImageCropApp {
             this.showStatus('已切换到框选模式', 'info');
         }
         this.updateUI();
+    }
+
+    // 撤销只恢复当前图片的选区，不改变缩放和画布位置。
+    restoreHistory(redo = false) {
+        if (this.isLoading || this.isExporting) return;
+        this.eventHandler.cancelCurrentOperation();
+        if (!this.selectionManager.restoreHistory(redo)) return;
+        this.render();
+        this.updateUI();
+        this.showStatus(redo ? '已重做' : '已撤销', 'info');
+    }
+
+    // 手动输入使用原图像素；先验证所有边界，再一次性更新，避免部分修改。
+    editSelection(selectionId, field, value) {
+        if (this.isLoading || this.isExporting) return;
+        this.eventHandler.cancelCurrentOperation();
+        const selection = this.selectionManager.getAllSelections().find(s => s.id === selectionId);
+        if (!selection) return;
+        const bounds = { x: selection.x, y: selection.y, width: selection.width, height: selection.height };
+        bounds[field] = Number(value);
+        if (selection.lockedRatio && field === 'width') bounds.height = bounds.width / selection.lockedRatio;
+        if (selection.lockedRatio && field === 'height') bounds.width = bounds.height * selection.lockedRatio;
+        if (value === '' || !Object.values(bounds).every(Number.isFinite) || bounds.x < 0 || bounds.y < 0 ||
+            bounds.width < 10 || bounds.height < 10 || bounds.x + bounds.width > this.imageManager.originalWidth ||
+            bounds.y + bounds.height > this.imageManager.originalHeight) {
+            this.showStatus('选区不能超出图片，宽高至少为 10 像素', 'error');
+            requestAnimationFrame(() => this.updateSelectionList());
+            return;
+        }
+        const before = this.selectionManager.snapshot();
+        this.selectionManager.updateSelection(selectionId, bounds);
+        this.selectionManager.recordChange(before);
+        this.render();
+        // 等本次 Tab/失焦导航完成再更新表单，避免替换浏览器正在移交焦点的输入节点。
+        requestAnimationFrame(() => this.updateUI());
     }
 
     setupDragAndDrop() {
@@ -2041,9 +2065,34 @@ class SelectionManager {
     constructor() {
         this.selections = [];
         this.activeSelectionId = null;
+        this.history = [];
+        this.future = [];
     }
 
-    createSelection(startX, startY, endX, endY) {
+    // 选区只含普通数值和文本，逐项复制即可隔离历史与正在拖动的对象。
+    snapshot() {
+        return this.selections.map(selection => ({ ...selection }));
+    }
+
+    recordChange(before) {
+        if (JSON.stringify(before) === JSON.stringify(this.selections)) return;
+        this.history.push(before);
+        // shortcut: 最多保留 50 步选区操作；需要跨图片历史时再扩展存储方式。
+        if (this.history.length > 50) this.history.shift();
+        this.future = [];
+    }
+
+    restoreHistory(redo = false) {
+        const source = redo ? this.future : this.history;
+        if (!source.length) return false;
+        const destination = redo ? this.history : this.future;
+        destination.push(this.snapshot());
+        this.selections = source.pop().map(selection => ({ ...selection }));
+        this.activeSelectionId = this.getActiveSelection()?.id || null;
+        return true;
+    }
+
+    createSelection(startX, startY, endX, endY, before = this.snapshot()) {
         // 基于当前选择框数量生成ID，确保编号连续
         const newId = this.selections.length + 1;
         const selection = {
@@ -2063,6 +2112,7 @@ class SelectionManager {
 
         this.selections.push(selection);
         this.setActiveSelection(selection.id);
+        this.recordChange(before);
 
         console.log(`创建选择框: ${selection.id}, 位置:(${Math.round(selection.x)}, ${Math.round(selection.y)}), 大小:${Math.round(selection.width)}×${Math.round(selection.height)}`);
 
@@ -2079,12 +2129,14 @@ class SelectionManager {
     deleteSelection(id) {
         const index = this.selections.findIndex(s => s.id === id);
         if (index !== -1) {
+            const before = this.snapshot();
             this.selections.splice(index, 1);
             if (this.activeSelectionId === id) {
                 this.activeSelectionId = null;
             }
             // 删除后重新编号所有选择框
             this.renumberSelections();
+            this.recordChange(before);
         }
     }
 
@@ -2129,6 +2181,8 @@ class SelectionManager {
     reset() {
         this.selections = [];
         this.activeSelectionId = null;
+        this.history = [];
+        this.future = [];
         console.log('选择框管理器已重置，下一个选择框将从1开始编号');
     }
 }
@@ -2185,8 +2239,10 @@ class CanvasRenderer {
         ctx.shadowBlur = 0;
 
         // 绘制半透明填充
-        ctx.fillStyle = isActive ? 'rgba(37, 100, 235, 0.10)' : 'rgba(113, 128, 153, 0.05)';
-        ctx.fillRect(canvasCoords.x, canvasCoords.y, canvasWidth, canvasHeight);
+        if (isActive) {
+            ctx.fillStyle = 'rgba(37, 100, 235, 0.06)';
+            ctx.fillRect(canvasCoords.x, canvasCoords.y, canvasWidth, canvasHeight);
+        }
 
         // 绘制选择框标签
         if (canvasWidth > 60 && canvasHeight > 25) {
@@ -2294,6 +2350,9 @@ class EventHandler {
         this.dragStartPos = { x: 0, y: 0 };
         this.activeHandle = null;
         this.currentSelection = null;
+        this.gestureBefore = null;
+        this.forceNewSelection = false;
+        this.spacePanState = null;
     }
 
     setMode(mode) {
@@ -2316,17 +2375,14 @@ class EventHandler {
             this.canvas.style.cursor = 'grabbing';
             return;
         }
-
-        // 选择模式：原有的选择框逻辑
-        // 检查是否在图片范围内
-        if (!this.imageManager.isPointInImage(x, y)) return;
+        if (!app.showSelections) return;
 
         // 转换为图片坐标
         const imageCoords = this.imageManager.canvasToImage(x, y);
 
         // 首先检查是否点击了活动选择框的调整手柄
         const activeSelection = this.selectionManager.getActiveSelection();
-        if (activeSelection) {
+        if (activeSelection && !this.forceNewSelection) {
             const handle = this.getResizeHandle(x, y, activeSelection);
             if (handle) {
                 // 开始调整选择框
@@ -2334,23 +2390,28 @@ class EventHandler {
                 this.activeHandle = handle;
                 this.currentSelection = activeSelection;
                 this.originalSelection = { ...activeSelection };
+                this.gestureBefore = this.selectionManager.snapshot();
                 return;
             }
         }
+        // 边界手柄的命中范围可伸到图片外，只有创建与移动才要求按下点位于图内。
+        if (!this.imageManager.isPointInImage(x, y)) return;
 
         // 检查是否点击了现有选择框
-        const clickedSelection = this.findSelectionAtPoint(x, y);
+        const clickedSelection = this.forceNewSelection ? null : this.findSelectionAtPoint(x, y);
 
         if (clickedSelection) {
             // 点击了现有选择框
             this.selectionManager.setActiveSelection(clickedSelection.id);
             this.isDragging = true;
             this.currentSelection = clickedSelection;
+            this.gestureBefore = this.selectionManager.snapshot();
             this.canvas.style.cursor = 'move';
         } else {
             // 开始创建新选择框
             this.isDrawing = true;
             this.dragStartPos = { x: imageCoords.x, y: imageCoords.y };
+            this.gestureBefore = this.selectionManager.snapshot();
             this.selectionManager.clearActiveSelection();
             this.canvas.style.cursor = 'crosshair';
         }
@@ -2443,7 +2504,7 @@ class EventHandler {
             const height = endY - startY;
 
             // 只有当选择框足够大时才创建
-            if (width > 10 && height > 10) {
+            if (width >= 10 && height >= 10) {
                 // 确保选择框在图片范围内
                 const clampedStartX = Math.max(0, Math.min(startX, this.imageManager.originalWidth));
                 const clampedStartY = Math.max(0, Math.min(startY, this.imageManager.originalHeight));
@@ -2453,12 +2514,20 @@ class EventHandler {
                 const clampedWidth = clampedEndX - clampedStartX;
                 const clampedHeight = clampedEndY - clampedStartY;
 
-                if (clampedWidth > 5 && clampedHeight > 5) {
-                    this.selectionManager.createSelection(clampedStartX, clampedStartY, clampedEndX, clampedEndY);
+                if (clampedWidth >= 10 && clampedHeight >= 10) {
+                    // 使用按下时的快照，撤销新建也恢复此前选中的框；创建方法负责记历史。
+                    this.selectionManager.createSelection(clampedStartX, clampedStartY, clampedEndX, clampedEndY, this.gestureBefore);
+                    this.gestureBefore = null;
+                    this.forceNewSelection = false;
                     app.showStatus('选择框创建成功', 'success');
                 }
             }
 
+            if (this.gestureBefore) {
+                this.selectionManager.selections = this.gestureBefore.map(selection => ({ ...selection }));
+                this.selectionManager.activeSelectionId = this.selectionManager.getActiveSelection()?.id || null;
+                this.gestureBefore = null;
+            }
             this.isDrawing = false;
         } else if (this.isResizing) {
             // 完成选择框调整
@@ -2472,6 +2541,9 @@ class EventHandler {
             app.showStatus('选择框移动完成', 'success');
         }
 
+        // 一次完整手势只保存一个历史快照，移动中的每帧不会挤满撤销记录。
+        if (this.gestureBefore) this.selectionManager.recordChange(this.gestureBefore);
+        this.gestureBefore = null;
         this.currentSelection = null;
         this.updateCursor(x, y);
         app.render();
@@ -2529,19 +2601,26 @@ class EventHandler {
             this.canvas.style.cursor = 'grab';
             return;
         }
-
-        if (!this.imageManager.isPointInImage(x, y)) {
+        if (!app.showSelections) {
             this.canvas.style.cursor = 'default';
             return;
         }
 
         const activeSelection = this.selectionManager.getActiveSelection();
-        if (activeSelection) {
+        if (activeSelection && !this.forceNewSelection) {
             const handle = this.getResizeHandle(x, y, activeSelection);
             if (handle) {
                 this.canvas.style.cursor = this.getHandleCursor(handle);
                 return;
             }
+        }
+        if (!this.imageManager.isPointInImage(x, y)) {
+            this.canvas.style.cursor = 'default';
+            return;
+        }
+        if (this.forceNewSelection) {
+            this.canvas.style.cursor = 'crosshair';
+            return;
         }
 
         const selection = this.findSelectionAtPoint(x, y);
@@ -2558,8 +2637,8 @@ class EventHandler {
         const canvasWidth = selection.width * this.imageManager.scale;
         const canvasHeight = selection.height * this.imageManager.scale;
 
-        const handleSize = 8;
-        const tolerance = handleSize / 2;
+        // 外观仍为 8px，命中范围最多 24px；小选区缩小范围，避免多个手柄完全重叠。
+        const tolerance = Math.min(12, Math.max(3, Math.min(canvasWidth, canvasHeight) / 4));
 
         // 定义手柄位置
         const handles = {
@@ -2603,11 +2682,17 @@ class EventHandler {
         // 表单、按钮和原生模态框保留浏览器键盘行为，避免输入空格、退格或 Tab 时操作画布。
         const target = event.target;
         if (document.querySelector('dialog[open]') ||
-            target?.closest?.('input, select, textarea, button, a, [contenteditable], .selection-item')) return;
+            target?.closest?.('input, select, textarea, button, a, [contenteditable]')) return;
         // 只在有图片时处理缩放快捷键
         if (!this.imageManager.hasImage()) return;
+        if (app.isLoading || app.isExporting) return;
 
-        if (event.ctrlKey) {
+        if (event.ctrlKey || event.metaKey) {
+            if (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y') {
+                event.preventDefault();
+                app.restoreHistory(event.shiftKey || event.key.toLowerCase() === 'y');
+                return;
+            }
             switch (event.key) {
                 case '=':
                 case '+':
@@ -2642,6 +2727,9 @@ class EventHandler {
             }
         }
 
+        // 列表条目自己处理 Enter、空格、方向键和删除；文档层只补充其撤销快捷键。
+        if (target?.closest?.('.selection-item')) return;
+
         // ESC键取消当前操作
         if (event.key === 'Escape') {
             this.cancelCurrentOperation();
@@ -2664,22 +2752,58 @@ class EventHandler {
             const activeSelection = this.selectionManager.getActiveSelection();
             if (activeSelection) {
                 event.preventDefault();
-                this.selectionManager.deleteSelection(activeSelection.id);
-                app.render();
-                app.updateUI();
-                app.showStatus('选择框已删除', 'info');
+                app.deleteActiveSelection();
             }
         }
 
-        // 空格键切换模式
+        if (event.key.startsWith('Arrow') && !event.ctrlKey && !event.metaKey && target === this.canvas) {
+            this.nudgeSelection(event);
+        }
+
+        // 空格只在按住时临时拖动，重复 keydown 不反复切换模式。
         if (event.key === ' ') {
             event.preventDefault();
-            const currentMode = this.mode === 'select' ? 'pan' : 'select';
-            app.setMode(currentMode);
+            if (this.spacePanState || this.isDrawing || this.isDragging || this.isResizing) return;
+            this.spacePanState = { mode: this.mode, forceNewSelection: this.forceNewSelection };
+            app.setMode('pan');
         }
     }
 
+    releaseSpacePan() {
+        if (!this.spacePanState) return;
+        const previous = this.spacePanState;
+        this.spacePanState = null;
+        app.setMode(previous.mode);
+        this.forceNewSelection = previous.forceNewSelection;
+        app.updateUI();
+    }
+
+    // 方向键按原图像素移动，与显示缩放无关；Shift 一次移动 10 像素。
+    nudgeSelection(event) {
+        const offsets = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+        const direction = offsets[event.key];
+        const selection = this.selectionManager.getActiveSelection();
+        if (!direction || !selection || app.isLoading || app.isExporting || this.isDragging || this.isResizing) return;
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1;
+        const before = this.selectionManager.snapshot();
+        this.selectionManager.updateSelection(selection.id, {
+            x: Math.max(0, Math.min(selection.x + direction[0] * step, this.imageManager.originalWidth - selection.width)),
+            y: Math.max(0, Math.min(selection.y + direction[1] * step, this.imageManager.originalHeight - selection.height))
+        });
+        this.selectionManager.recordChange(before);
+        app.render();
+        app.updateUI();
+    }
+
     cancelCurrentOperation() {
+        // Esc、失焦或触控取消时撤回未完成的几何修改，不留下无法撤销的半次手势。
+        if (this.gestureBefore) {
+            this.selectionManager.selections = this.gestureBefore.map(selection => ({ ...selection }));
+            this.selectionManager.activeSelectionId = this.selectionManager.getActiveSelection()?.id || null;
+        }
+        this.gestureBefore = null;
+        this.forceNewSelection = false;
         this.isDrawing = false;
         this.isDragging = false;
         this.isResizing = false;
@@ -2720,86 +2844,48 @@ class EventHandler {
     // 调整选择框大小
     resizeSelection(mouseX, mouseY) {
         if (!this.currentSelection || !this.activeHandle || !this.originalSelection) return;
-
-        // 转换鼠标位置为图片坐标
-        const mouseImageCoords = this.imageManager.canvasToImage(mouseX, mouseY);
-        const startImageCoords = this.imageManager.canvasToImage(this.dragStartPos.x, this.dragStartPos.y);
-
-        // 计算偏移量
-        const deltaX = mouseImageCoords.x - startImageCoords.x;
-        const deltaY = mouseImageCoords.y - startImageCoords.y;
-
-        let newBounds = { ...this.originalSelection };
-
-        // 根据手柄类型调整选择框
-        switch (this.activeHandle) {
-            case 'nw': // 左上角
-                newBounds.x += deltaX;
-                newBounds.y += deltaY;
-                newBounds.width -= deltaX;
-                newBounds.height -= deltaY;
-                break;
-
-            case 'ne': // 右上角
-                newBounds.y += deltaY;
-                newBounds.width += deltaX;
-                newBounds.height -= deltaY;
-                break;
-
-            case 'sw': // 左下角
-                newBounds.x += deltaX;
-                newBounds.width -= deltaX;
-                newBounds.height += deltaY;
-                break;
-
-            case 'se': // 右下角
-                newBounds.width += deltaX;
-                newBounds.height += deltaY;
-                break;
-
-            case 'n': // 上边
-                newBounds.y += deltaY;
-                newBounds.height -= deltaY;
-                break;
-
-            case 's': // 下边
-                newBounds.height += deltaY;
-                break;
-
-            case 'w': // 左边
-                newBounds.x += deltaX;
-                newBounds.width -= deltaX;
-                break;
-
-            case 'e': // 右边
-                newBounds.width += deltaX;
-                break;
+        const mouse = this.imageManager.canvasToImage(mouseX, mouseY);
+        const start = this.imageManager.canvasToImage(this.dragStartPos.x, this.dragStartPos.y);
+        const original = this.originalSelection;
+        const handle = this.activeHandle;
+        const west = handle.includes('w');
+        const east = handle.includes('e');
+        const north = handle.includes('n');
+        const south = handle.includes('s');
+        const right = original.x + original.width;
+        const bottom = original.y + original.height;
+        const imageWidth = this.imageManager.originalWidth;
+        const imageHeight = this.imageManager.originalHeight;
+        let left = original.x;
+        let top = original.y;
+        let newRight = right;
+        let newBottom = bottom;
+        // 先约束正在拖动的边，另一边保持原位；拖出图片不会把整块选区推走。
+        if (west) left = Math.max(0, Math.min(original.x + mouse.x - start.x, right - 10));
+        if (east) newRight = Math.min(imageWidth, Math.max(right + mouse.x - start.x, original.x + 10));
+        if (north) top = Math.max(0, Math.min(original.y + mouse.y - start.y, bottom - 10));
+        if (south) newBottom = Math.min(imageHeight, Math.max(bottom + mouse.y - start.y, original.y + 10));
+        let width = newRight - left;
+        let height = newBottom - top;
+        if (original.lockedRatio) {
+            const ratio = original.lockedRatio;
+            const horizontal = west || east;
+            const vertical = north || south;
+            const centerX = original.x + original.width / 2;
+            const centerY = original.y + original.height / 2;
+            // 角手柄固定对角；边手柄固定对边中点，保持比例时对称调整另一轴。
+            const maxWidth = horizontal ? (west ? right : imageWidth - original.x) : 2 * Math.min(centerX, imageWidth - centerX);
+            const maxHeight = vertical ? (north ? bottom : imageHeight - original.y) : 2 * Math.min(centerY, imageHeight - centerY);
+            if (!horizontal || (vertical && Math.abs(height * ratio - original.width) > Math.abs(width - original.width))) width = height * ratio;
+            const minimum = Math.max(10, 10 * ratio);
+            const maximum = Math.min(maxWidth, maxHeight * ratio);
+            if (maximum < minimum) return;
+            width = Math.max(minimum, Math.min(width, maximum));
+            height = width / ratio;
+            left = west ? right - width : east ? original.x : centerX - width / 2;
+            top = north ? bottom - height : south ? original.y : centerY - height / 2;
         }
-
-        // 确保最小尺寸
-        const minSize = 10;
-        if (newBounds.width < minSize) {
-            if (this.activeHandle.includes('w')) {
-                newBounds.x = this.originalSelection.x + this.originalSelection.width - minSize;
-            }
-            newBounds.width = minSize;
-        }
-
-        if (newBounds.height < minSize) {
-            if (this.activeHandle.includes('n')) {
-                newBounds.y = this.originalSelection.y + this.originalSelection.height - minSize;
-            }
-            newBounds.height = minSize;
-        }
-
-        // 确保不超出图片边界
-        newBounds.x = Math.max(0, newBounds.x);
-        newBounds.y = Math.max(0, newBounds.y);
-        newBounds.width = Math.min(newBounds.width, this.imageManager.originalWidth - newBounds.x);
-        newBounds.height = Math.min(newBounds.height, this.imageManager.originalHeight - newBounds.y);
-
-        // 更新选择框
-        this.selectionManager.updateSelection(this.currentSelection.id, newBounds);
+        this.selectionManager.updateSelection(this.currentSelection.id, { x: left, y: top, width, height });
     }
 
     handleRightClick(event) {
@@ -2827,6 +2913,7 @@ class EventHandler {
 
     handleWheel(event) {
         if (!this.imageManager.hasImage()) return;
+        if (app.isLoading || app.isExporting || this.isDrawing || this.isDragging || this.isResizing || this.isPanning) return;
 
         const rect = this.canvas.getBoundingClientRect();
         const mouseX = event.clientX - rect.left;
@@ -3377,6 +3464,11 @@ function runZoomTests() {
     testCanvas.height = 600;
     const testCtx = testCanvas.getContext('2d');
     const imageManager = new ImageManager(testCanvas, testCtx);
+    // 缩放方法只在已加载图片时生效，使用测试画布作为本地图片源。
+    imageManager.image = testCanvas;
+    imageManager.originalWidth = testCanvas.width;
+    imageManager.originalHeight = testCanvas.height;
+    imageManager.fitImageToCanvas();
 
     testSuite.test('缩放边界测试', () => {
         imageManager.scale = 1;
@@ -3643,7 +3735,7 @@ function runExportIntegrityTests() {
         const initialSelections = [...selectionManager.getAllSelections()];
 
         // 模拟导出过程中使用数据副本
-        const selectionsToExport = [...selectionManager.getAllSelections()];
+        const selectionsToExport = selectionManager.snapshot();
 
         // 模拟对副本的操作（这不应该影响原始数据）
         selectionsToExport.pop(); // 删除副本中的最后一个元素
@@ -3675,7 +3767,7 @@ function runExportIntegrityTests() {
         const originalData = JSON.parse(JSON.stringify(selectionManager.getAllSelections()));
 
         // 模拟导出过程
-        const selectionsToExport = [...selectionManager.getAllSelections()];
+        const selectionsToExport = selectionManager.snapshot();
 
         // 模拟对导出数据的各种操作
         selectionsToExport.forEach(selection => {
@@ -3779,7 +3871,7 @@ function runIntegrationTests() {
         const initialIds = selectionManager.getAllSelections().map(s => s.id);
 
         // 模拟完整的导出流程
-        const selectionsToExport = [...selectionManager.getAllSelections()];
+        const selectionsToExport = selectionManager.snapshot();
 
         // 模拟导出过程中的各种操作
         for (let i = 0; i < selectionsToExport.length; i++) {
@@ -3818,7 +3910,7 @@ function runIntegrationTests() {
 
         // 测试空选择框列表的重置
         selectionManager.reset();
-        if (selectionManager.getAllSelections().length !== 0 || selectionManager.nextId !== 1) {
+        if (selectionManager.getAllSelections().length !== 0) {
             throw new Error('空选择框列表重置失败');
         }
 

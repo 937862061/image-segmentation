@@ -28,12 +28,18 @@
         <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
         <symbol id="icon-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Zm-4 9 3 3 5-5"/></symbol>
         <symbol id="icon-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/></symbol>
+        <symbol id="icon-undo" viewBox="0 0 24 24"><path d="m8 4-5 5 5 5M3 9h11a6 6 0 0 1 0 12h-3"/></symbol>
+        <symbol id="icon-redo" viewBox="0 0 24 24"><path d="m16 4 5 5-5 5m5-5H10a6 6 0 0 0 0 12h3"/></symbol>
+        <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
     </svg>
     <!-- 紧凑顶栏承载文件操作和缩放；浅色左栏专注模式与选区，右侧保留大画布。 -->
     <div class="app-container">
         <header class="app-header">
             <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#icon-crop"/></svg></span><h1 class="brand-name">图片裁剪<span class="brand-subtitle">框选 · 批量导出</span></h1></div>
-            <div class="header-tools" aria-label="画布缩放工具"><div class="zoom-toolbar" role="group" aria-label="缩放控制">
+            <div class="header-tools" aria-label="编辑与缩放工具"><div class="history-tools" role="group" aria-label="编辑历史">
+                            <button id="undoBtn" class="tool-btn" aria-label="撤销" title="撤销（Ctrl + Z）" disabled><svg class="icon"><use href="#icon-undo"/></svg></button>
+                            <button id="redoBtn" class="tool-btn" aria-label="重做" title="重做（Ctrl + Shift + Z）" disabled><svg class="icon"><use href="#icon-redo"/></svg></button>
+                        </div><div class="zoom-toolbar" role="group" aria-label="缩放控制">
                             <button id="zoomOutBtn" class="tool-btn" aria-label="缩小图片" title="缩小（Ctrl + -）" disabled><svg class="icon"><use href="#icon-minus"/></svg></button>
                             <select id="zoomPreset" class="zoom-select" aria-label="图片缩放比例" disabled><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100" selected>100%</option><option value="125">125%</option><option value="150">150%</option><option value="200">200%</option><option value="300">300%</option><option id="customZoomOption" hidden></option></select>
                             <button id="zoomInBtn" class="tool-btn" aria-label="放大图片" title="放大（Ctrl + +）" disabled><svg class="icon"><use href="#icon-plus"/></svg></button>
@@ -41,40 +47,44 @@
                         <button id="resetZoomBtn" class="tool-btn-small" title="原始大小（Ctrl + 1）" disabled><span>1:1</span></button></div></div>
             <div class="main-actions">
                 <input type="file" id="imageInput" accept="image/jpeg,image/png,image/gif,image/bmp,image/webp" hidden>
-                <button id="uploadBtn" class="btn btn-secondary"><svg class="icon"><use href="#icon-upload"/></svg><span>上传图片</span></button>
+                <button id="uploadBtn" class="btn btn-secondary"><svg class="icon"><use href="#icon-upload"/></svg><span>打开图片</span></button>
                 <button id="exportBtn" class="btn btn-primary" disabled><svg class="icon"><use href="#icon-download"/></svg><span>导出选区</span></button>
             </div>
         </header>
         <div class="workspace">
             <aside class="sidebar" aria-label="编辑工具与选区面板">
                 <div class="toolbar" aria-label="选区操作工具">
-                    <div class="tool-label">操作模式 <span>空格切换</span></div>
+                    <div class="tool-label">操作模式 <span>按住空格拖动</span></div>
                     <div class="mode-toggle" role="group" aria-label="操作模式">
-                            <button id="selectModeBtn" class="mode-btn active" aria-pressed="true" title="框选模式（空格切换）"><svg class="icon"><use href="#icon-select"/></svg><span>框选</span></button>
-                            <button id="panModeBtn" class="mode-btn" aria-pressed="false" title="拖动模式（空格切换）"><svg class="icon"><use href="#icon-hand"/></svg><span>拖动</span></button>
+                            <button id="selectModeBtn" class="mode-btn active" aria-pressed="true" title="框选与编辑选区"><svg class="icon"><use href="#icon-select"/></svg><span>框选</span></button>
+                            <button id="panModeBtn" class="mode-btn" aria-pressed="false" title="拖动画布，也可按住空格临时拖动"><svg class="icon"><use href="#icon-hand"/></svg><span>拖动</span></button>
                         </div>
-                    <p id="canvasHint" class="tool-hint">上传图片后，在画布中拖拽创建选区</p>
+                    <p id="canvasHint" class="tool-hint">打开图片后，在画布中拖拽创建选区</p>
                 </div>
                 <section class="image-section"><div class="section-header"><h2><svg class="icon"><use href="#icon-image"/></svg>当前图片</h2><span id="imageState" class="subtle-tag">未上传</span></div><div class="image-summary"><span class="file-icon"><svg class="icon"><use href="#icon-image"/></svg></span><div class="file-details"><strong id="imageName">等待导入图片</strong><span id="imageMeta">你的下一张作品，从这里开始</span></div></div></section>
-                <section class="sidebar-section selections-section"><div class="section-header"><h2><svg class="icon"><use href="#icon-layers"/></svg>裁剪选区</h2><span class="selection-count" id="selectionCount">0</span></div><p class="section-description">每个选区将导出为一张独立图片</p><div id="selectionList" class="selection-list"></div></section>
-                <section class="sidebar-section shortcuts-section collapsed"><button class="section-header collapsible" id="shortcutsToggle" aria-expanded="false" aria-controls="shortcutsContent" onclick="toggleShortcuts()"><span class="section-title"><svg class="icon"><use href="#icon-keyboard"/></svg>快捷键指南</span><svg class="icon toggle-icon"><use href="#icon-chevron"/></svg></button><div class="shortcuts" id="shortcutsContent"><div class="shortcut-item"><span>放大 / 缩小</span><kbd>Ctrl + / −</kbd></div><div class="shortcut-item"><span>精确缩放</span><kbd>滚轮</kbd></div><div class="shortcut-item"><span>适合窗口</span><kbd>Ctrl 0</kbd></div><div class="shortcut-item"><span>切换模式</span><kbd>空格</kbd></div><div class="shortcut-item"><span>切换选区</span><kbd>Tab</kbd></div><div class="shortcut-item"><span>删除选区</span><kbd>Delete</kbd></div><p class="shortcut-note">拖拽边角调整大小，双击列表定位选区。画布内 Tab 切换选区，Esc 取消选中后可离开画布。</p></div></section>
-                <div class="sidebar-footer"><svg class="icon"><use href="#icon-shield"/></svg>图片仅在本地处理<span>准备就绪</span></div>
+                <section class="sidebar-section selections-section">
+                    <div class="section-header"><h2><svg class="icon"><use href="#icon-layers"/></svg>裁剪选区 <span class="selection-count" id="selectionCount">0</span></h2><button id="toggleSelectionsBtn" class="btn-icon" aria-label="隐藏选区" title="隐藏选区，查看原图" aria-pressed="false" disabled><svg class="icon"><use href="#icon-eye"/></svg></button></div>
+                    <button id="newSelectionBtn" class="new-selection-btn" aria-pressed="false" disabled><svg class="icon"><use href="#icon-plus"/></svg>新建选区</button>
+                    <p class="section-description">点选编辑尺寸 · 双击定位到画布</p><div id="selectionList" class="selection-list"></div>
+                </section>
+                <section class="sidebar-section shortcuts-section collapsed"><button class="section-header collapsible" id="shortcutsToggle" aria-expanded="false" aria-controls="shortcutsContent" onclick="toggleShortcuts()"><span class="section-title"><svg class="icon"><use href="#icon-keyboard"/></svg>快捷键指南</span><svg class="icon toggle-icon"><use href="#icon-chevron"/></svg></button><div class="shortcuts" id="shortcutsContent"><div class="shortcut-item"><span>放大 / 缩小</span><kbd>Ctrl + / −</kbd></div><div class="shortcut-item"><span>精确缩放</span><kbd>滚轮</kbd></div><div class="shortcut-item"><span>适合窗口</span><kbd>Ctrl 0</kbd></div><div class="shortcut-item"><span>临时拖动画布</span><kbd>按住空格</kbd></div><div class="shortcut-item"><span>切换选区</span><kbd>Tab</kbd></div><div class="shortcut-item"><span>移动选区</span><kbd>方向键 / Shift</kbd></div><div class="shortcut-item"><span>撤销 / 重做</span><kbd>Ctrl Z / Ctrl Shift Z</kbd></div><div class="shortcut-item"><span>删除选区</span><kbd>Delete</kbd></div><p class="shortcut-note">拖拽边角调整大小，双击列表定位选区。画布内 Tab 切换选区，Esc 取消选中后可离开画布。</p></div></section>
+                <div class="sidebar-footer"><span class="local-note"><svg class="icon"><use href="#icon-shield"/></svg>图片仅在本地处理</span><span id="operationStatus" role="status" aria-live="polite">准备就绪</span></div>
             </aside>
             <main class="main-area" aria-label="图片编辑工作区">
                 <!-- 空状态提供直接上传入口；SVG 插画不依赖外部图片服务。 -->
                     <div class="canvas-container">
-                        <canvas id="mainCanvas" width="800" height="600" tabindex="0" aria-label="图片画布，拖拽创建选区，空格切换模式，Tab 切换选区"></canvas>
+                        <canvas id="mainCanvas" width="800" height="600" tabindex="0" aria-label="图片画布，拖拽创建选区，按住空格拖动画布，方向键微调，Tab 切换选区"></canvas>
                         <div id="welcomeMessage" class="welcome-message"><div class="welcome-content">
                             <div class="welcome-art" aria-hidden="true"><svg viewBox="0 0 200 160" fill="none"><rect class="art-back" x="48" y="22" width="112" height="100" rx="12" transform="rotate(10 104 72)"/><rect class="art-front" x="33" y="29" width="120" height="100" rx="12"/><circle class="art-sun" cx="64" cy="58" r="9"/><path class="art-mountain" d="m34 108 35-32 23 20 22-35 38 48v9a10 10 0 0 1-10 10H44a10 10 0 0 1-10-10Z"/><path class="art-frame" d="M26 48V23h25m83 0h25v25M26 111v25h25m108-25v25h-25"/><rect class="art-handle" x="22" y="19" width="8" height="8" rx="2"/><rect class="art-handle" x="155" y="132" width="8" height="8" rx="2"/></svg></div>
                             <span class="eyebrow">从一张图片开始</span><h2>留下你想要的部分</h2><p>拖入图片，自由框选。一次导出多个精彩细节。</p>
                             <button id="welcomeUploadBtn" class="btn btn-primary"><svg class="icon"><use href="#icon-plus"/></svg>选择一张图片</button><span class="upload-hint">JPG、PNG、WebP、GIF、BMP · 最大 10 MB</span>
-                            <div class="welcome-steps"><span><b>01</b> 上传图片</span><svg class="icon"><use href="#icon-chevron"/></svg><span><b>02</b> 框选区域</span><svg class="icon"><use href="#icon-chevron"/></svg><span><b>03</b> 批量导出</span></div>
+                            <div class="welcome-steps"><span><b>01</b> 打开图片</span><svg class="icon"><use href="#icon-chevron"/></svg><span><b>02</b> 框选区域</span><svg class="icon"><use href="#icon-chevron"/></svg><span><b>03</b> 批量导出</span></div>
                         </div></div>
                     </div>
             </main>
         </div>
     </div>
-    <div id="statusMessage" class="status-message" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="statusMessage" class="status-message"><span id="statusText"></span><button id="statusUndoBtn" class="status-undo-btn" hidden>撤销</button></div>
     <div id="contextMenu" class="context-menu"><button class="context-menu-item" id="deleteSelection"><svg class="icon"><use href="#icon-trash"/></svg>删除选区</button></div>
 </body>
 </html>
